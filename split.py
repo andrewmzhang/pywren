@@ -1,4 +1,3 @@
-port boto3
 import numpy as np
 from sklearn import preprocessing
 
@@ -7,7 +6,7 @@ import boto3
 import pickle
 
 # Split the large file into bits
-batch_size = 5000
+batch_size = 1000
 header_name = "sample"
 suffix_name =".txt"
 
@@ -44,7 +43,7 @@ s3 = boto3.resource('s3')
 for b in range(batches):
 
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
-    key = 'test' + str(b)
+    key = '1k-' + str(b)
 
     assert data.shape[0] == batch_size
     ys = data[:, 0]
@@ -57,4 +56,4 @@ for b in range(batches):
 
     batch = (xs_dense, xs_sparse, ys)
     datastr = pickle.dumps(batch)
-    s3.Bucket('camus-pywren-991').put_object(Key=key, Body=datastr)
+    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
