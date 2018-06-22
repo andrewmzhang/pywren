@@ -1,4 +1,4 @@
-
+import sys
 import pywren
 import numpy as np
 import math
@@ -7,21 +7,23 @@ import pickle
 import time
 import random
 
+from threading import Event
 from threading import Thread
 from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
 
 HASH = 1000000
-#lr = .000002
 lr = 0.0001
 batch_size = 1000
-total_batches = 30
+total_batches = 1000
 batch_file_size = 3
 
 from multiprocessing.pool import ThreadPool
 from sklearn.preprocessing import OneHotEncoder
 
+
+kill_signal = Event()
 
 # Prediction function
 def prediction(param_dense, param_sparse, x_dense, x_sparse):
@@ -180,18 +182,18 @@ def m(f):
     if f.done():
         return f.result(), f
 
-ALL_STOP = False
 
 grad_q = []
 
 def fetch_thread(i):
     global grad_q
+    global kill_signal
     s3 = boto3.resource('s3')
 
     my_bucket = s3.Bucket('camus-pywren-489')
 
     num = 0
-    while not ALL_STOP:
+    while not kill_signal.is_set():
         for object in my_bucket.objects.filter(Prefix='gradient_%d/' % i).all():
             s = time.time()
             obj = object.get()
@@ -200,10 +202,17 @@ def fetch_thread(i):
             object.delete()
             num += 1
             print("Fetched: %d, took: %f, thread: %d" % (num, time.time() - s, i))
+            if kill_signal.is_set():
+                return;
 
 
 def error_thread(model):
     global grad_q
+    global log
+    global fname
+    global kill_signal
+    global outf 
+    
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket('camus-pywren-489')
     num = 0
@@ -212,7 +221,12 @@ def error_thread(model):
     # Clear existing gradients
 
     test_data = get_test_data()
-    while not ALL_STOP:
+
+    saves = 0
+
+    if log:
+        f = open(fname.split(".")[0] + ".pkl", 'ab')
+    while not kill_signal.is_set():
         grads = grad_q[:]
         grad_q = []
         if len(grads) > 0:
@@ -220,13 +234,32 @@ def error_thread(model):
             model = update_model(model, bg)
             store_model(model)
             num += len(grads)
-            print("[ERROR_TASK]", time.time() - start_time, loglikelihood(test_data, model), "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            error = loglikelihood(test_data, model)
+            curr_time = time.time() - start_time
+            print("[ERROR_TASK]", curr_time, error, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            if log:
+                print("dumping")
+                pickle.dump((curr_time, model), f)
+                saves += 1
+    if log:
+        large_test = get_test_data()
+        f.close()
+
+        with open(fname.split(".")[0] + ".pkl", 'rb') as f:
+            for i in range(saves):
+                t, model = pickle.load(f)
+                error = loglikelihood(test_data, model)
+                print("wrote: %f %f" % (t, error))
+                outf.write("%f, %f\n" % (t, error))
+
+            
 
 
 
-def main(thread):
 
+def main(thread, log=False):
 
+    global kill_signal
 
     # Initialize model
 
@@ -243,8 +276,9 @@ def main(thread):
     iter = 0
 
     thread.start()
-
-    while iter < 100:
+    print("Main thread start")
+    while time.time() - start_time < 30:
+        print("hit")
         # Store model
         fin = 0
         res = []
@@ -269,20 +303,37 @@ def main(thread):
         iter += fin
         if fin > 0:
             print("Processed: %d" % fin)
-        if fin > 0:
             minibatches = get_minibatches(fin)
             # Run Map Reduce with Pywren
             fs.extend(start_batch(minibatches))
-
-
+    kill_signal.set()
+    print("Main thread has stopped")
+log = False
+fname = ""
+outf = None
 if __name__ == "__main__":
+
+
+    log = False
+    if len(sys.argv) > 2:
+        log = True
+        fname = sys.argv[1]
+        lr = float(sys.argv[2])
+        outf = open(fname, "w")
+        print("Logging was requested with output file: %s and rate: %f" % (fname, lr))
 
     s3 = boto3.resource('s3')
 
     my_bucket = s3.Bucket('camus-pywren-489')
-    for object in my_bucket.objects.filter(Prefix='gradient/').all():
+    for object in my_bucket.objects.filter(Prefix='gradient_1/').all():
         object.delete()
-
+    for object in my_bucket.objects.filter(Prefix='gradient_2/').all():
+        object.delete()
+    for object in my_bucket.objects.filter(Prefix='gradient_3/').all():
+        object.delete()
+    for object in my_bucket.objects.filter(Prefix='gradient_4/').all():
+        object.delete()
+    time.sleep(5)
     model = init_model()
     store_model(model)
 
@@ -298,7 +349,28 @@ if __name__ == "__main__":
     ft4.start()
 
     try:
-        pass
-        main(thread)
+        main(thread, log)
     except KeyboardInterrupt:
-        ALL_STOP = True
+        kill_signal.set()
+        ft.join()
+        ft2.join()
+        ft3.join()
+        ft4.join()
+        thread.join()
+        if log:
+            outf.close()
+            print("outf closed by interrupt")
+        exit()
+
+
+    if log:
+        kill_signal.set()
+        print("issued log halt")
+        ft.join()
+        ft2.join()
+        ft3.join()
+        ft4.join()
+        thread.join()
+        time.sleep(10)
+        outf.close()
+        print("outf closed by END")
