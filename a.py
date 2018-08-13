@@ -13,16 +13,25 @@ from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
 
+import logging
+logging.basicConfig(filename="test.log", level=logging.INFO)
+
+
 HASH = 1000000
-lr = 0.0001
-batch_size = 1000
-total_batches = 1000
-batch_file_size = 3
+
+lr = 0.0001            # Learning rate
+minibatch_size = 20    # Size of minibatch
+batch_size = 1000      # Size of whole batch
+total_batches = 1000   # Entire number of batches in dataset
+batch_file_size = 2    # Number of minibatches per lambda 
+num_lambdas = 10
+
+
 
 from multiprocessing.pool import ThreadPool
 from sklearn.preprocessing import OneHotEncoder
 
-
+fin = []
 kill_signal = Event()
 
 # Prediction function
@@ -33,26 +42,50 @@ def prediction(param_dense, param_sparse, x_dense, x_sparse):
     out =  1 / (1 + np.exp(val))
     return out
 
-def store_update(update, lid, gid):
+def store_update(update):
+    t0 = time.time()
     s3 = boto3.resource('s3')
     key = 'gradient_%d/g_%d' % (np.random.randint(1, 5), random.randint(1, 1000))
     datastr = pickle.dumps(update)
+    t1 = time.time()
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    # Return reserialzie, upload
+    return t1 - t0, time.time() - t1
+
 
 # Map function for pywren main
 def gradient_batch(xpys):
-    t = time.time()
+    start = time.time()
     model = get_data('model')
+    fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
+    reser, upload, model_fetch = 0, 0, 0
+
+    iterno = 0
     for xpy in xpys:
-        left, right, det = gradient(xpy, model)
-        out = (np.sum(left, axis=0), np.sum(right, axis=0))
-        #return out[0], out[1]
-        duration = time.time() - t
-        det['dur'] = duration
-        to_store = [t, time.time(), time.time() - t, det, out[0], out[1]]
-        store_update(to_store, 1, 1)
-        model = update_model(model, to_store[-2:])
+        det = {}
+        for mb in get_minis(xpy, det):
+
+
+            left, right, det = gradient(mb, model, det)
+            out = (np.sum(left, axis=0), np.sum(right, axis=0))
+
+            if iterno == 0:
+                det['init_model_fetch'] = fetch_model_time
+
+            if iterno > 0:
+                det['reserialize_time'] = reser
+                det['upload_time'] = upload
+                det['model_fetch_time'] = model_fetch
+        
+            to_store = [det, out[0], out[1]]
+            reser, upload = store_update(to_store)
+            model = update_model(model, to_store[-2:])
+
+
+            iterno += 1
+    
+    to_store[0]['lambda_time_alive'] = time.time() - start
     return to_store
 
 # convert matrices to dense and sparse halves
@@ -62,41 +95,45 @@ def convert(x_idx, shape):
         x_sparse[i, x_idx[i]] = np.ones(len(x_idx[i]))
     return x_sparse
 
-def gradient(xpy, model):
-    det = {}
-
-    t = time.time()
+def gradient(xpy, model, det):
+    
+    start = time.time()
+    # Fetch model
     param_dense, param_sparse = model
+    
+    # Fetch data and deser
+    (x_dense, x_idx, y) = xpy
 
-    det['fetch_model'] = time.time() - t
-    t = time.time()
-    x_dense, x_idx, y = get_data(xpy)
-    det['fetch_data'] = time.time() - t
+    # Convert data to sparse
     t = time.time()
     x_sparse = convert(x_idx, x_dense.shape[0])
-    det['convert'] = time.time() - t
+    det['convert_to_sparse'] = time.time() - t
 
+
+    
+    # Predictions
     t = time.time()
     y = np.reshape(y, (-1, 1))
     error = y - prediction(param_dense, param_sparse, x_dense, x_sparse)
     error = np.reshape(error, (-1,))
-    det['pred'] = time.time() - t
+    det['prediction_time'] = time.time() - t
+
+
+    # Calculation left_gradient
     t = time.time()
     left_grad = np.multiply(x_dense, error.reshape(-1, 1))
-    det['lmult'] = time.time() - t
+    det['lgradient_calc'] = time.time() - t
 
+    # Calculate right gradient (sparse part)
     t = time.time()
     temp = sparse.lil_matrix((x_dense.shape[0], x_dense.shape[0]))
-    det['rmult0'] = time.time() - t
-    t = time.time()
+   
     temp.setdiag(error.A1)
-    det['rmult1'] = time.time() - t
-    t = time.time()
     right = temp.T * x_sparse
-    det['rmult2'] = time.time() - t
-    t = time.time()
     right_grad = right
-    det['rmult3'] = time.time() - t
+    det['rgradient_calc'] = time.time() - t
+    
+    det['total_gradient_loop' ] = time.time() - start
     return left_grad, right_grad, det
 
 # Reduce function
@@ -116,12 +153,28 @@ def loglikelihood(test_data, model):
     tot = np.multiply(ys_temp, np.log(preds)) + np.multiply((1 - ys_temp), np.log(1 - preds))
     return np.mean(tot)
 
+def get_minis(key, det):
+    data, deser, fetch = get_data(key, True)
+    det['batch_deserialized_time'] = deser
+    det['batch_fetch_time'] = fetch
+    a, b, c = data
+    idx = 0
+    while idx + minibatch_size <= batch_size:
+        yield a[idx: idx +minibatch_size], b[idx: idx +minibatch_size], c[idx: idx +minibatch_size], 
+        idx += minibatch_size
+
+
 # AWS helper function
-def get_data(key):
+def get_data(key, a = False):
     s3 = boto3.resource('s3')
+    t0 = time.time()
     obj = s3.Object('camus-pywren-489', key)
+    t1 = time.time()
     body = obj.get()['Body'].read()
     data = pickle.loads(body)
+    # Return data, time to deseralize, time to fetch
+    if a:
+        return data, time.time() - t1, t1 - t0
     return data
 
 def store_model(model):
@@ -198,6 +251,10 @@ def fetch_thread(i):
             s = time.time()
             obj = object.get()
             grad = pickle.loads(obj['Body'].read())
+            
+            for key, value in grad[0].items():
+                logging.info("%s %f" % (key, value))
+            
             grad_q.append(grad[-2:])
             object.delete()
             num += 1
@@ -277,7 +334,7 @@ def main(thread, log=False):
 
     thread.start()
     print("Main thread start")
-    while time.time() - start_time < 30:
+    while time.time() - start_time < 300:
         print("hit")
         # Store model
         fin = 0
@@ -286,7 +343,7 @@ def main(thread, log=False):
 
         #print("Start pool")
         t = time.time()
-        pool = ThreadPool(6)
+        pool = ThreadPool(num_lambdas)
         resa = []
         resa = pool.map(m, fs)
         #print("End pool: %f" % (time.time() - t))
@@ -296,7 +353,7 @@ def main(thread, log=False):
             if a != None:
                 fs.remove(a[1])
                 res.append(a[0])
-                print(a[0][3])
+                print("FIN", a)
 
 
         fin = len(res)
@@ -350,6 +407,7 @@ if __name__ == "__main__":
 
     try:
         main(thread, log)
+        print(fin)
     except KeyboardInterrupt:
         kill_signal.set()
         ft.join()
