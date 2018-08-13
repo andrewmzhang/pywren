@@ -59,7 +59,7 @@ def gradient_batch(xpys):
     model = get_data('model')
     fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
-    reser, upload, model_fetch = 0, 0, 0
+    reser, upload, model_fetch, model_deser = 0, 0, 0, 0
 
     iterno = 0
     for xpy in xpys:
@@ -76,11 +76,12 @@ def gradient_batch(xpys):
             if iterno > 0:
                 det['reserialize_time'] = reser
                 det['upload_time'] = upload
+                det['model_deser_time'] = model_deser
                 det['model_fetch_time'] = model_fetch
         
             to_store = [det, out[0], out[1]]
             reser, upload = store_update(to_store)
-            model = update_model(model, to_store[-2:])
+            model, model_deser, model_fetch = get_data('model', True)
 
 
             iterno += 1
@@ -334,7 +335,7 @@ def main(thread, log=False):
 
     thread.start()
     print("Main thread start")
-    while time.time() - start_time < 300:
+    while time.time() - start_time < 1200:
         print("hit")
         # Store model
         fin = 0
