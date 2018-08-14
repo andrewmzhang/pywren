@@ -12,8 +12,8 @@ batch_size = 20      # size of minibatch
 header_name = "sample"
 suffix_name =".txt"
 
-input_file = "sample.txt"
-test_file = "test.txt"
+input_file = "train.txt"
+max_size = 500
 
 with open(input_file, "rb") as f:
     cnt = 0
@@ -27,6 +27,8 @@ with open(input_file, "rb") as f:
             out.close()
             file_idx += 1
             out = open(header_name + str(file_idx) + suffix_name, "wb")
+        if (idx > max_size):
+            break;
     out.close()
 
 
@@ -43,11 +45,12 @@ for i in range(14, 40):
     converter[i] = lambda s: hash(s) % HASH
 s3 = boto3.resource('s3')
 
-for b in range(batches):
-
+for b in range(min(batches, max_size)):
+    
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
-    key = str(batch_size) '-' + str(b)
-
+    key = '1k-' + str(b)
+    
+    print("Setting up", key)
     assert data.shape[0] == batch_size
     ys = data[:, 0]
     xs_dense = data[:, 1:14]
@@ -61,18 +64,3 @@ for b in range(batches):
     datastr = pickle.dumps(batch)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
-'''
-
-data = np.loadtxt('text.txt', converters=converter, delimiter="\t")
-key = 'test.txt'
-assert data.shape[0] == batch_size
-ys = data[:, 0]
-xs_dense = data[:, 1:14]
-xs_sparse = data[:, 14:]
-min_max_scaler = preprocessing.MinMaxScaler()
-xs_dense = min_max_scaler.fit_transform(xs_dense)
-xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
-batch = (xs_dense, xs_sparse, ys)
-datastr = pickle.dumps(batch)
-s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
-'''

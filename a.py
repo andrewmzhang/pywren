@@ -282,7 +282,7 @@ def error_thread(model):
 
     saves = 0
 
-    if log:
+    if True:
         f = open(fname.split(".")[0] + ".pkl", 'ab')
     while not kill_signal.is_set():
         grads = grad_q[:]
@@ -295,11 +295,13 @@ def error_thread(model):
             error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, error, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
-            if log:
+            if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
                 saves += 1
-    if log:
+
+    print("Saves: ", saves)
+    if True:
         large_test = get_test_data()
         f.close()
 
@@ -335,7 +337,7 @@ def main(thread, log=False):
 
     thread.start()
     print("Main thread start")
-    while time.time() - start_time < 1200:
+    while time.time() - start_time < 120:
         print("hit")
         # Store model
         fin = 0
