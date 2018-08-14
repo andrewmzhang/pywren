@@ -10,7 +10,8 @@ batch_size = 1000
 header_name = "sample"
 suffix_name =".txt"
 
-input_file = "sample.txt"
+input_file = "train.txt"
+max_size = 500
 
 with open(input_file, "rb") as f:
     cnt = 0
@@ -24,6 +25,8 @@ with open(input_file, "rb") as f:
             out.close()
             file_idx += 1
             out = open(header_name + str(file_idx) + suffix_name, "wb")
+        if (idx > max_size):
+            break;
     out.close()
 
 
@@ -40,11 +43,12 @@ for i in range(14, 40):
     converter[i] = lambda s: hash(s) % HASH
 s3 = boto3.resource('s3')
 
-for b in range(batches):
-
+for b in range(min(batches, max_size)):
+    
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
     key = '1k-' + str(b)
-
+    
+    print("Setting up", key)
     assert data.shape[0] == batch_size
     ys = data[:, 0]
     xs_dense = data[:, 1:14]
