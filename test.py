@@ -16,7 +16,6 @@ for i in range(14, 40):
 data = np.loadtxt('testset.txt', converters=converter, delimiter="\t")
 
 print("Setting up", key)
-assert data.shape[0] == batch_size
 ys = data[:, 0]
 xs_dense = data[:, 1:14]
 xs_sparse = data[:, 14:]
@@ -26,11 +25,9 @@ xs_dense = min_max_scaler.fit_transform(xs_dense)
 xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
 
 batch = (xs_dense, xs_sparse, ys)
-datastr = pickle.dumps(batch)
 
 
 out = open("testset.data", "w")
 
-out.write(datastr)
-
+pickle.dump(batch, out)
 out.close()

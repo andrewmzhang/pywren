@@ -23,7 +23,7 @@ lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
 batch_size = 1000      # Size of whole batch
 total_batches = 1000   # Entire number of batches in dataset
-batch_file_size = 2    # Number of minibatches per lambda 
+batch_file_size = 10    # Number of minibatches per lambda 
 num_lambdas = 10
 
 
@@ -82,7 +82,8 @@ def gradient_batch(xpys):
             to_store = [det, out[0], out[1]]
             reser, upload = store_update(to_store)
             model, model_deser, model_fetch = get_data('model', True)
-
+            if time.time() - start > 240:
+                break;
 
             iterno += 1
     
@@ -187,7 +188,7 @@ def store_model(model):
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
 index = 1
-def get_minibatches(num, over=10):
+def get_minibatches(num, over=1):
     global index
     group = []
     for i in range(num):
@@ -226,6 +227,12 @@ def get_test_data():
         x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
     return (x_dense_test, x_sparse_test, y_test)
 
+def get_local_test_data():
+    x_dense_test, x_idx_test, y_test = pickle.loads("testset.txt")
+    x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
+    for i in range(x_dense_test.shape[0]):
+        x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
+    return (x_dense_test, x_sparse_test, y_test)
 
 def start_batch(minibatches):
     wrenexec = pywren.default_executor()
@@ -272,7 +279,6 @@ def error_thread(model):
     global log
     global fname
     global kill_signal
-    global outf 
     
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket('camus-pywren-489')
@@ -305,17 +311,17 @@ def error_thread(model):
 
     print("Saves: ", saves)
     if True:
-        large_test = get_test_data()
+        large_test = get_local_test_data()
         f.close()
-
+        outf = open("test_error", "w")
         with open(fname.split(".")[0] + ".pkl", 'rb') as f:
             for i in range(saves):
                 t, model = pickle.load(f)
                 error = loglikelihood(test_data, model)
                 print("wrote: %f %f" % (t, error))
                 outf.write("%f, %f\n" % (t, error))
-
-            
+        outf.close()
+         
 
 
 
@@ -340,7 +346,7 @@ def main(thread, log=False):
 
     thread.start()
     print("Main thread start")
-    while time.time() - start_time < 120:
+    while time.time() - start_time < 1800:
         print("hit")
         # Store model
         fin = 0
@@ -372,7 +378,7 @@ def main(thread, log=False):
     kill_signal.set()
     print("Main thread has stopped")
 log = False
-fname = ""
+fname = "def"
 outf = None
 if __name__ == "__main__":
 
