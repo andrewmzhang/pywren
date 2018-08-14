@@ -6,11 +6,14 @@ import boto3
 import pickle
 
 # Split the large file into bits
-batch_size = 1000
+batch_size = 20      # size of minibatch
+
+
 header_name = "sample"
 suffix_name =".txt"
 
 input_file = "sample.txt"
+test_file = "test.txt"
 
 with open(input_file, "rb") as f:
     cnt = 0
@@ -43,7 +46,7 @@ s3 = boto3.resource('s3')
 for b in range(batches):
 
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
-    key = '1k-' + str(b)
+    key = str(batch_size) '-' + str(b)
 
     assert data.shape[0] == batch_size
     ys = data[:, 0]
@@ -57,3 +60,19 @@ for b in range(batches):
     batch = (xs_dense, xs_sparse, ys)
     datastr = pickle.dumps(batch)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+
+'''
+
+data = np.loadtxt('text.txt', converters=converter, delimiter="\t")
+key = 'test.txt'
+assert data.shape[0] == batch_size
+ys = data[:, 0]
+xs_dense = data[:, 1:14]
+xs_sparse = data[:, 14:]
+min_max_scaler = preprocessing.MinMaxScaler()
+xs_dense = min_max_scaler.fit_transform(xs_dense)
+xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
+batch = (xs_dense, xs_sparse, ys)
+datastr = pickle.dumps(batch)
+s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+'''
