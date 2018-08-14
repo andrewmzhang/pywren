@@ -299,6 +299,8 @@ def error_thread(model):
                 print("dumping")
                 pickle.dump((curr_time, model), f)
                 saves += 1
+
+    print("Saves: ", saves)
     if log:
         large_test = get_test_data()
         f.close()
