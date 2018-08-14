@@ -78,7 +78,7 @@ def gradient_batch(xpys):
                 det['upload_time'] = upload
                 det['model_deser_time'] = model_deser
                 det['model_fetch_time'] = model_fetch
-        
+            det['subtime'] = time.time()
             to_store = [det, out[0], out[1]]
             reser, upload = store_update(to_store)
             model, model_deser, model_fetch = get_data('model', True)
@@ -254,12 +254,15 @@ def fetch_thread(i):
             grad = pickle.loads(obj['Body'].read())
             
             for key, value in grad[0].items():
-                logging.info("%s %f" % (key, value))
+                if key == "subtime":
+                    logging.info("%s %f" % ("Sit_time", time.time() - value))
+                else:
+                    logging.info("%s %f" % (key, value))
             
             grad_q.append(grad[-2:])
             object.delete()
             num += 1
-            print("Fetched: %d, took: %f, thread: %d" % (num, time.time() - s, i))
+            print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
             if kill_signal.is_set():
                 return;
 
