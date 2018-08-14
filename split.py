@@ -6,7 +6,9 @@ import boto3
 import pickle
 
 # Split the large file into bits
-batch_size = 1000
+batch_size = 20      # size of minibatch
+
+
 header_name = "sample"
 suffix_name =".txt"
 
@@ -61,3 +63,4 @@ for b in range(min(batches, max_size)):
     batch = (xs_dense, xs_sparse, ys)
     datastr = pickle.dumps(batch)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+
