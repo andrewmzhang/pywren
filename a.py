@@ -210,6 +210,7 @@ def update_model(model, gradient):
     left = np.reshape(left, (14, 1))
     right = np.reshape(right, (HASH, 1))
     param_dense, param_sparse = model
+    
     param_dense = np.add(param_dense, np.multiply(lr, left))
     param_sparse = sparse.lil_matrix(np.add(param_sparse.todense(), np.multiply(lr, right)))
     return (param_dense, param_sparse)
@@ -388,9 +389,10 @@ def main(thread, log=False):
 if __name__ == "__main__":
     print(len(sys.argv)) 
     global outf
-
+    global lr
     log = False
     if len(sys.argv) >= 2:
+        global lr
         data = json.loads(sys.argv[1])
         total_time = data['total_time']
         log = True
