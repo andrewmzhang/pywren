@@ -7,15 +7,13 @@ import pickle
 import time
 import random
 
+import json
+
 from threading import Event
 from threading import Thread
 from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
-
-import logging
-logging.basicConfig(filename="test.log", level=logging.INFO)
-
 
 HASH = 1000000
 
@@ -25,7 +23,10 @@ batch_size = 1000      # Size of whole batch
 total_batches = 1000   # Entire number of batches in dataset
 batch_file_size = 10    # Number of minibatches per lambda 
 num_lambdas = 10
-
+total_time = 60
+log = False
+fname = "def.txt"
+outf = None
 
 
 from multiprocessing.pool import ThreadPool
@@ -188,7 +189,7 @@ def store_model(model):
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
 index = 1
-def get_minibatches(num, over=1):
+def get_minibatches(num, over=2):
     global index
     group = []
     for i in range(num):
@@ -228,10 +229,13 @@ def get_test_data():
     return (x_dense_test, x_sparse_test, y_test)
 
 def get_local_test_data():
-    x_dense_test, x_idx_test, y_test = pickle.loads("testset.txt")
+    f = open("testset.data", "rb")
+    f.seek(0)
+    x_dense_test, x_idx_test, y_test = pickle.load(f)
     x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
     for i in range(x_dense_test.shape[0]):
         x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
+    f.close()
     return (x_dense_test, x_sparse_test, y_test)
 
 def start_batch(minibatches):
@@ -247,6 +251,7 @@ def m(f):
 grad_q = []
 
 def fetch_thread(i):
+    global outf
     global grad_q
     global kill_signal
     s3 = boto3.resource('s3')
@@ -262,9 +267,9 @@ def fetch_thread(i):
             
             for key, value in grad[0].items():
                 if key == "subtime":
-                    logging.info("%s %f" % ("Sit_time", time.time() - value))
+                    outf.write("%s %f\n" % ("Sit_time", time.time() - value))
                 else:
-                    logging.info("%s %f" % (key, value))
+                    outf.write("%s %f\n" % (key, value))
             
             grad_q.append(grad[-2:])
             object.delete()
@@ -292,7 +297,7 @@ def error_thread(model):
     saves = 0
 
     if True:
-        f = open(fname.split(".")[0] + ".pkl", 'ab')
+        f = open(fname[:-4] + ".pkl", 'ab')
     while not kill_signal.is_set():
         grads = grad_q[:]
         grad_q = []
@@ -313,8 +318,8 @@ def error_thread(model):
     if True:
         large_test = get_local_test_data()
         f.close()
-        outf = open("test_error", "w")
-        with open(fname.split(".")[0] + ".pkl", 'rb') as f:
+        outf = open(fname[:-4] + ".csv", "w")
+        with open(fname[:-4] + ".pkl", 'rb') as f:
             for i in range(saves):
                 t, model = pickle.load(f)
                 error = loglikelihood(test_data, model)
@@ -329,6 +334,7 @@ def error_thread(model):
 def main(thread, log=False):
 
     global kill_signal
+    global total_time
 
     # Initialize model
 
@@ -346,7 +352,7 @@ def main(thread, log=False):
 
     thread.start()
     print("Main thread start")
-    while time.time() - start_time < 1800:
+    while time.time() - start_time < total_time:
         print("hit")
         # Store model
         fin = 0
@@ -377,18 +383,28 @@ def main(thread, log=False):
             fs.extend(start_batch(minibatches))
     kill_signal.set()
     print("Main thread has stopped")
-log = False
-fname = "def"
-outf = None
-if __name__ == "__main__":
 
+
+if __name__ == "__main__":
+    print(len(sys.argv)) 
+    global outf
 
     log = False
-    if len(sys.argv) > 2:
+    if len(sys.argv) >= 2:
+        data = json.loads(sys.argv[1])
+        total_time = data['total_time']
         log = True
-        fname = sys.argv[1]
-        lr = float(sys.argv[2])
+        fname = data['fname']
+        lr = float(data['lr'])
         outf = open(fname, "w")
+        
+        outf.write("lr: %f\n" % lr)
+        outf.write("minibatch_size: %f\n" % minibatch_size)
+        outf.write("batch_file_size: %d\n" % batch_file_size)
+        outf.write("num_lambdas: %d\n" % num_lambdas)
+        outf.write("fname: %s\n" % fname)
+        outf.write("total_time: %d\n" % total_time)
+        
         print("Logging was requested with output file: %s and rate: %f" % (fname, lr))
 
     s3 = boto3.resource('s3')
