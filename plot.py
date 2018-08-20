@@ -5,17 +5,20 @@ import plotly.figure_factory as FF
 
 import pandas as pd
 
+traces= []
 
-df = pd.read_csv('test_error')
+for i in range(1, len(sys.argv)):
+    df = pd.read_csv(argv[i])
 
-trace = go.Scatter(
+    trace = go.Scatter(
         x=df.iloc[:, 0],
-        y=-df.iloc[:, 1]
-        )
+        y=-df.iloc[:, 1],
+        name=argv[i]
+    )
+    traces.append(trace)
 
-fig = go.Figure(data=[trace])
+fig = go.Figure(data=traces)
 
-#offline.plot(fig, image="png")
 
 py.image.save_as(fig, filename="fig.png")
 
