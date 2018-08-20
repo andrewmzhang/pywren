@@ -45,7 +45,7 @@ def prediction(param_dense, param_sparse, x_dense, x_sparse):
 def store_update(update):
     t0 = time.time()
     s3 = boto3.resource('s3')
-    key = 'gradient_%d/g_%d' % (np.random.randint(1, 5), random.randint(1, 1000))
+    key = 'gradient_%d/g_%d' % (np.random.randint(1, 9), random.randint(1, 10))
     datastr = pickle.dumps(update)
     t1 = time.time()
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
@@ -411,37 +411,30 @@ if __name__ == "__main__":
     s3 = boto3.resource('s3')
 
     my_bucket = s3.Bucket('camus-pywren-489')
-    for object in my_bucket.objects.filter(Prefix='gradient_1/').all():
-        object.delete()
-    for object in my_bucket.objects.filter(Prefix='gradient_2/').all():
-        object.delete()
-    for object in my_bucket.objects.filter(Prefix='gradient_3/').all():
-        object.delete()
-    for object in my_bucket.objects.filter(Prefix='gradient_4/').all():
-        object.delete()
+
+    for i in range(1, 9):
+        string = "gradient_%d/" % i
+        for object in my_bucket.objects.filter(Prefix=string).all():
+            object.delete()
+
     time.sleep(5)
     model = init_model()
     store_model(model)
 
     thread = Thread(target=error_thread, args=(model, ))
-    ft = Thread(target=fetch_thread, args=(1, ))
-    ft2 = Thread(target=fetch_thread, args=(2, ))
-    ft3 = Thread(target=fetch_thread, args=(3, ))
-    ft4 = Thread(target=fetch_thread, args=(4, ))
+    fetchers = []
 
-    ft.start()
-    ft2.start()
-    ft3.start()
-    ft4.start()
-
+    for i in range(1, 9):
+        ft = Thread(target=fetch_thread, args = (i, ))
+        ft.start()
+        fetchers.append(ft)
     try:
         main(thread, log)
         print(fin)
     except KeyboardInterrupt:
-        ft.join()
-        ft2.join()
-        ft3.join()
-        ft4.join()
+        for ft in fetchers:
+            ft.join()
+
         thread.join()
         if log:
             outf.close()
@@ -451,10 +444,8 @@ if __name__ == "__main__":
 
     if log:
         print("issued log halt")
-        ft.join()
-        ft2.join()
-        ft3.join()
-        ft4.join()
+        for ft in fetchers:
+            ft.start()        
         thread.join()
         time.sleep(10)
         outf.close()

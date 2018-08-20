@@ -3,11 +3,10 @@ import os
 import json
 config = {
     "lr": 0.0001,
-    "total_time": 600,
+    "total_time": 1200,
 }
-# 0.00009 0.00004 0.00003
 
-for lr in [ 0.00008]:
+for lr in [ 0.0005]:
     fname = "tmp-%f-loss.txt" % lr
     config['fname'] = fname
     config['lr'] = lr
