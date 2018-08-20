@@ -43,8 +43,8 @@ def get_local_test_data():
 large_test = get_local_test_data()
 
 
-outf = open("test_error", "w")
-with open("def.pkl", 'rb') as f:
+outf = open("tmp-0.000500-loss.csv", "w")
+with open("tmp-0.000500-loss.pkl", 'rb') as f:
     for i in range(300):
         t, model = pickle.load(f)
         error = loglikelihood(large_test, model)

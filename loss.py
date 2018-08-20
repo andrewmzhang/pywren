@@ -3,7 +3,7 @@ import os
 import json
 config = {
     "lr": 0.0001,
-    "total_time": 1200,
+    "total_time": 2400,
 }
 
 for lr in [ 0.0005]:

@@ -84,8 +84,9 @@ def gradient_batch(xpys):
             model, model_deser, model_fetch = get_data('model', True)
             if time.time() - start > 240:
                 break;
-
             iterno += 1
+        if time.time() - start > 240:
+            break;
     
     to_store[0]['lambda_time_alive'] = time.time() - start
     return to_store
@@ -185,6 +186,7 @@ def store_model(model):
     key = 'model'
     model = (param_dense, param_sparse)
     datastr = pickle.dumps(model)
+    s3.Bucket('camus-pywren-489').delete_object(Key=key)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
 index = 1
@@ -244,8 +246,11 @@ def start_batch(minibatches):
     return futures
 
 def m(f):
-    if f.done():
-        return f.result(), f
+    try:
+        if f.done():
+            return f.result(), f
+    except:
+        return [], f
 
 
 grad_q = []
@@ -260,9 +265,7 @@ def fetch_thread(i):
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
-        st = time.time()
         lst = my_bucket.objects.filter(Prefix='gradient_%d/' % i).all()
-        print("Get all keys: %f" % (time.time() - st))
         for object in lst:
             s = time.time()
             obj = object.get()
@@ -277,7 +280,7 @@ def fetch_thread(i):
             grad_q.append(grad[-2:])
             object.delete()
             num += 1
-            print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
+            #print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
             if time.time() - start_time > total_time:
                 return;
 
@@ -355,7 +358,7 @@ def main(thread, log=False):
     thread.start()
     print("Main thread start")
     while time.time() - start_time < total_time:
-        print("hit")
+        print("hit", time.time() - start_time)
         # Store model
         fin = 0
         res = []
@@ -448,7 +451,7 @@ if __name__ == "__main__":
     if log:
         print("issued log halt")
         for ft in fetchers:
-            ft.start()        
+            ft.join()        
         thread.join()
         time.sleep(10)
         outf.close()
