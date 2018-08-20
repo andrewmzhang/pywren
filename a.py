@@ -33,7 +33,6 @@ from multiprocessing.pool import ThreadPool
 from sklearn.preprocessing import OneHotEncoder
 
 fin = []
-kill_signal = Event()
 
 # Prediction function
 def prediction(param_dense, param_sparse, x_dense, x_sparse):
@@ -254,13 +253,13 @@ grad_q = []
 def fetch_thread(i):
     global outf
     global grad_q
-    global kill_signal
     s3 = boto3.resource('s3')
 
     my_bucket = s3.Bucket('camus-pywren-489')
 
     num = 0
-    while not kill_signal.is_set():
+    start_time = time.time()
+    while time.time() - start_time < total_time:
         for object in my_bucket.objects.filter(Prefix='gradient_%d/' % i).all():
             s = time.time()
             obj = object.get()
@@ -276,7 +275,7 @@ def fetch_thread(i):
             object.delete()
             num += 1
             print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
-            if kill_signal.is_set():
+            if time.time() - start_time > total_time:
                 return;
 
 
@@ -284,7 +283,6 @@ def error_thread(model):
     global grad_q
     global log
     global fname
-    global kill_signal
     
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket('camus-pywren-489')
@@ -299,7 +297,7 @@ def error_thread(model):
 
     if True:
         f = open(fname[:-4] + ".pkl", 'ab')
-    while not kill_signal.is_set():
+    while time.time() - start_time < total_time:
         grads = grad_q[:]
         grad_q = []
         if len(grads) > 0:
@@ -334,7 +332,7 @@ def error_thread(model):
 
 def main(thread, log=False):
 
-    global kill_signal
+    global outf
     global total_time
 
     # Initialize model
@@ -382,7 +380,6 @@ def main(thread, log=False):
             minibatches = get_minibatches(fin)
             # Run Map Reduce with Pywren
             fs.extend(start_batch(minibatches))
-    kill_signal.set()
     print("Main thread has stopped")
 
 
@@ -390,11 +387,13 @@ if __name__ == "__main__":
     print(len(sys.argv)) 
     global outf
     global lr
+    global total_time
+    global log
+    global fname
     log = False
     if len(sys.argv) >= 2:
-        global lr
         data = json.loads(sys.argv[1])
-        total_time = data['total_time']
+        total_time = float(data['total_time'])
         log = True
         fname = data['fname']
         lr = float(data['lr'])
@@ -439,7 +438,6 @@ if __name__ == "__main__":
         main(thread, log)
         print(fin)
     except KeyboardInterrupt:
-        kill_signal.set()
         ft.join()
         ft2.join()
         ft3.join()
@@ -452,7 +450,6 @@ if __name__ == "__main__":
 
 
     if log:
-        kill_signal.set()
         print("issued log halt")
         ft.join()
         ft2.join()
