@@ -260,7 +260,10 @@ def fetch_thread(i):
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
-        for object in my_bucket.objects.filter(Prefix='gradient_%d/' % i).all():
+        st = time.time()
+        lst = my_bucket.objects.filter(Prefix='gradient_%d/' % i).all()
+        print("Get all keys: %f" % (time.time() - st))
+        for object in lst:
             s = time.time()
             obj = object.get()
             grad = pickle.loads(obj['Body'].read())
