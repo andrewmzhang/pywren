@@ -13,7 +13,7 @@ header_name = "sample"
 suffix_name =".txt"
 
 input_file = "train.txt"
-max_size = 1 #500
+max_size = 500
 
 with open(input_file, "rb") as f:
     cnt = 0
@@ -33,7 +33,7 @@ with open(input_file, "rb") as f:
 
 
 
-HASH = 1000000
+HASH = 524288
 batches = file_idx
 
 print("this many batches", batches)
@@ -49,13 +49,14 @@ scaler = preprocessing.MinMaxScaler()
 
 fit_mat = [
 [0,-3, 0, 0, 0, 0,0,0, 0,0,0, 0,0], 
-[5775, 257675, -3, 65535, 969, 23159500, 431037, 56311, 6047, 29019, 11, 231, 4008, 7393] ]
+[5775, 257675, 65535, 969, 23159500, 431037, 56311, 6047, 29019, 11, 231, 4008, 7393] ]
 
+fit_mat = np.matrix(fit_mat)
 scaler.fit(fit_mat)
 for b in range(min(batches, max_size)):
     
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
-    key = '1k-' + str(b)
+    key = 'proper-' + str(b)
     
     print("Setting up", key)
     assert data.shape[0] == batch_size
@@ -65,9 +66,7 @@ for b in range(min(batches, max_size)):
 
     xs_dense = scaler.transform(xs_dense)
     xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
-    exit()
-
     batch = (xs_dense, xs_sparse, ys)
     datastr = pickle.dumps(batch)
-#    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 

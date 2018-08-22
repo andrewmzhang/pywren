@@ -15,7 +15,7 @@ from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
 
-HASH = 1000000
+HASH = 524288
 
 lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
@@ -202,7 +202,7 @@ def get_minibatches(num, over=2):
         begin, end = index, index + over
         minis = []
         for b in range(begin, end):
-            key = '1k-' + str(b)
+            key = 'proper-' + str(b)
             minis.append(key)
         index = index + over
         group.append(' '.join(mini for mini in minis))
@@ -226,7 +226,7 @@ def init_model():
     return model
 
 def get_test_data():
-    test_key = "1k-0"
+    test_key = "proper-0"
     x_dense_test, x_idx_test, y_test = get_data(test_key)
     x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
     for i in range(x_dense_test.shape[0]):
