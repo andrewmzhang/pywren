@@ -48,7 +48,10 @@ def store_update(update):
     key = 'gradient_%d/g_%d' % (np.random.randint(1, 9), random.randint(1, 10))
     datastr = pickle.dumps(update)
     t1 = time.time()
-    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    def up_func(s3, key, datastr):
+        s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    thread = Thread(target = up_func, args = (s3, key, datastr ))
+    thread.start()
     # Return reserialzie, upload
     return t1 - t0, time.time() - t1
 
@@ -210,6 +213,7 @@ def get_minibatches(num, over=2):
     return group
 
 def update_model(model, gradient):
+    global lr
     left, right = gradient
     left = np.reshape(left, (14, 1))
     right = np.reshape(right, (HASH, 1))

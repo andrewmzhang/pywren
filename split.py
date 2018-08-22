@@ -6,7 +6,7 @@ import boto3
 import pickle
 
 # Split the large file into bits
-batch_size = 20      # size of minibatch
+batch_size = 1000      # size of minibatch
 
 
 header_name = "sample"
