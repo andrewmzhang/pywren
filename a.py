@@ -153,6 +153,10 @@ def loglikelihood(test_data, model):
     param_dense, param_sparse = model
     preds = prediction(param_dense, param_sparse, xs_dense, xs_sparse)
     ys_temp = ys.reshape((-1, 1))
+    cors = np.around(preds)
+    cors -= ys_temp
+    cors = np.abs(cors)
+    print("Accu", np.mean(cors))
     tot = np.multiply(ys_temp, np.log(preds)) + np.multiply((1 - ys_temp), np.log(1 - preds))
     return np.mean(tot)
 
@@ -186,7 +190,6 @@ def store_model(model):
     key = 'model'
     model = (param_dense, param_sparse)
     datastr = pickle.dumps(model)
-    s3.Bucket('camus-pywren-489').delete_object(Key=key)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
 index = 1
@@ -302,7 +305,8 @@ def error_thread(model):
     saves = 0
 
     if True:
-        f = open(fname[:-4] + ".pkl", 'ab')
+        print(fname[:-4] + ".pkl")
+        f = open(fname[:-4] + ".pkl", 'wb')
     while time.time() - start_time < total_time:
         grads = grad_q[:]
         grad_q = []
@@ -327,7 +331,7 @@ def error_thread(model):
         with open(fname[:-4] + ".pkl", 'rb') as f:
             for i in range(saves):
                 t, model = pickle.load(f)
-                error = loglikelihood(test_data, model)
+                error = loglikelihood(large_test, model)
                 print("wrote: %f %f" % (t, error))
                 outf.write("%f, %f\n" % (t, error))
         outf.close()

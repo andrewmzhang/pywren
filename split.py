@@ -13,7 +13,7 @@ header_name = "sample"
 suffix_name =".txt"
 
 input_file = "train.txt"
-max_size = 500
+max_size = 1 #500
 
 with open(input_file, "rb") as f:
     cnt = 0
@@ -45,6 +45,13 @@ for i in range(14, 40):
     converter[i] = lambda s: hash(s) % HASH
 s3 = boto3.resource('s3')
 
+scaler = preprocessing.MinMaxScaler()
+
+fit_mat = [
+[0,-3, 0, 0, 0, 0,0,0, 0,0,0, 0,0], 
+[5775, 257675, -3, 65535, 969, 23159500, 431037, 56311, 6047, 29019, 11, 231, 4008, 7393] ]
+
+scaler.fit(fit_mat)
 for b in range(min(batches, max_size)):
     
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
@@ -56,11 +63,11 @@ for b in range(min(batches, max_size)):
     xs_dense = data[:, 1:14]
     xs_sparse = data[:, 14:]
 
-    min_max_scaler = preprocessing.MinMaxScaler()
-    xs_dense = min_max_scaler.fit_transform(xs_dense)
+    xs_dense = scaler.transform(xs_dense)
     xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
+    exit()
 
     batch = (xs_dense, xs_sparse, ys)
     datastr = pickle.dumps(batch)
-    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+#    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 

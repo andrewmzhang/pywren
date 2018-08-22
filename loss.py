@@ -3,7 +3,7 @@ import os
 import json
 config = {
     "lr": 0.0001,
-    "total_time": 2400,
+    "total_time": 500,
 }
 
 for lr in [ 0.0005]:
@@ -13,4 +13,3 @@ for lr in [ 0.0005]:
     cmd = "python3 a.py '%s'" % json.dumps(config)
     print(cmd)
     os.system(cmd)
-    os.system("rm *.pkl")
