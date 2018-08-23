@@ -6,7 +6,7 @@ config = {
     "total_time": 500,
 }
 
-for lr in [ 0.0005, 0.0003, 0.0001, 0.00007, 0.00005]:
+for lr in [ 0.0005 , 0.0003, 0.0001, 0.00007, 0.00005]:
     fname = "tmp-%f-loss.txt" % lr
     config['fname'] = fname
     config['lr'] = lr
