@@ -69,7 +69,9 @@ def gradient_batch(xpys):
     for xpy in xpys:
         det = {}
         for mb in get_minis(xpy, det):
-
+            if iterno > 0:
+                det['loop_time'] = time.time() - prev_start_time
+            prev_start_time = time.time()
 
             left, right, det = gradient(mb, model, det)
             out = (np.sum(left, axis=0), np.sum(right, axis=0))
@@ -78,6 +80,7 @@ def gradient_batch(xpys):
                 det['init_model_fetch'] = fetch_model_time
 
             if iterno > 0:
+                
                 det['reserialize_time'] = reser
                 det['upload_time'] = upload
                 det['model_deser_time'] = model_deser
