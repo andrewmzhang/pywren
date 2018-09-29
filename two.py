@@ -22,7 +22,7 @@ lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
 batch_size = 3000      # Size of whole batch
 total_batches = 500   # Entire number of batches in dataset
-batch_file_size = 10    # Number of lambda
+batch_file_size = 8    # Number of lambda
 num_lambdas = 10
 total_time = 60
 log = False
@@ -43,22 +43,20 @@ def prediction(param_dense, param_sparse, x_dense, x_sparse):
     out =  1 / (1 + np.exp(val))
     return out
 
-def store_update(update):
+def store_update(update, number):
     t0 = time.time()
     s3 = boto3.resource('s3')
-    key = 'gradient_%d/g_%d' % (np.random.randint(1, 9), random.randint(1, 10))
+    key = 'gradient_indiv_%d' % (number)
     datastr = pickle.dumps(update)
     t1 = time.time()
-    def up_func(s3, key, datastr):
-        s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
-    thread = Thread(target = up_func, args = (s3, key, datastr ))
-    thread.start()
+    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
     # Return reserialzie, upload
     return t1 - t0, time.time() - t1
 
 
 # Map function for pywren main
-def gradient_batch(xpys):
+def gradient_batch(xpys, number):
+    print("I am lambda number: %d" % number)
     start = time.time()
     model = get_data('model')
     fetch_model_time = time.time() - start
@@ -88,6 +86,9 @@ def gradient_batch(xpys):
             det['subtime'] = time.time()
             to_store = [det, out[0], out[1]]
             reser, upload = store_update(to_store)
+
+            while not check_key('gradient_indiv_%d' % (number)):
+                pass
             model, model_deser, model_fetch = get_data('model', True)
             iterno += 1
             if True:
@@ -267,6 +268,22 @@ def m(f):
 
 grad_q = queue.Queue()
 
+def check_key(key):
+    s3 = boto3.resource('s3')
+
+    try:
+        s3.Object('camus-pywren-489', key).load()
+    except botocore.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == "404":
+            # The object does not exist.
+            return False
+        else:
+            # Something else has gone wrong.
+            raise ValueError("boom")
+    else:
+        return True
+
+
 def fetch_thread(i):
     global outf
     global grad_q
@@ -277,25 +294,24 @@ def fetch_thread(i):
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
-        lst = my_bucket.objects.filter(Prefix='gradient_%d/' % i).all()
-        for object in lst:
-            s = time.time()
-            obj = object.get()
-            grad = pickle.loads(obj['Body'].read())
+        key = 'gradient_indiv_%d' % i
+        while time.time() - start_time < total_time and (check_key(key)):
+            pass
+        object = my_bucket.Object('gradient_indiv_%d' % i)
+        body = object.get()['Body'].read()
 
-            for key, value in grad[0].items():
-                if key == "subtime" and log:
-                    outf.write("%s %f\n" % ("Sit_time", time.time() - value))
-                else:
-                    if log:
-                        outf.write("%s %f\n" % (key, value))
+        for key, value in grad[0].items():
+            if key == "subtime" and log:
+                outf.write("%s %f\n" % ("Sit_time", time.time() - value))
+            else:
+                if log:
+                    outf.write("%s %f\n" % (key, value))
 
-            grad_q.put(grad[-2:])
-            object.delete()
-            num += 1
-            #print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
-            if time.time() - start_time > total_time:
-                return;
+        grad_q.put(grad[-2:])
+        object.delete()
+        num += 1
+        if time.time() - start_time > total_time:
+            return;
 
 
 def error_thread(model):
@@ -373,6 +389,7 @@ def main(thread, log=False):
 
     # start jobs
     minibatches = get_minibatches(fin)
+    minibatches = zip(minibatches, range(len(minibatches)))
     futures = start_batch(minibatches)
     fin = 0
     iter = 0
