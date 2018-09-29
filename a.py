@@ -284,10 +284,11 @@ def fetch_thread(i):
             grad = pickle.loads(obj['Body'].read())
             
             for key, value in grad[0].items():
-                if key == "subtime":
+                if key == "subtime" and log:
                     outf.write("%s %f\n" % ("Sit_time", time.time() - value))
                 else:
-                    outf.write("%s %f\n" % (key, value))
+                    if log:
+                        outf.write("%s %f\n" % (key, value))
             
             grad_q.put(grad[-2:])
             object.delete()
