@@ -193,8 +193,8 @@ def get_data(key, a = False):
     if a:
         return data, time.time() - t1, t1 - t0
     return data
-    
-    
+
+
 
 def store_model(model):
     param_dense, param_sparse = model
@@ -289,7 +289,7 @@ def fetch_thread(i):
                     outf.write("%s %f\n" % (key, value))
 
             grad_q.append(grad[-2:])
-            object.delete()
+            redis_client.lpop('gradient_%d' % i)
             num += 1
             #print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
             if time.time() - start_time > total_time:
