@@ -7,9 +7,10 @@ import boto3
 import pickle
 import time
 import random
-
+import botocore
 import json
 
+from threading import Barrier
 from threading import Event
 from threading import Thread
 from sklearn import preprocessing
@@ -55,7 +56,8 @@ def store_update(update, number):
 
 
 # Map function for pywren main
-def gradient_batch(xpys, number):
+def gradient_batch(xpys):
+    xpys, number = xpys
     print("I am lambda number: %d" % number)
     start = time.time()
     model = get_data('model')
@@ -85,15 +87,12 @@ def gradient_batch(xpys, number):
                 det['model_fetch_time'] = model_fetch
             det['subtime'] = time.time()
             to_store = [det, out[0], out[1]]
-            reser, upload = store_update(to_store)
+            reser, upload = store_update(to_store, number)
 
-            while not check_key('gradient_indiv_%d' % (number)):
+            while check_key('gradient_indiv_%d' % (number)):
                 pass
             model, model_deser, model_fetch = get_data('model', True)
             iterno += 1
-            if True:
-                break;
-        if True:
             break;
 
     to_store[0]['lambda_time_alive'] = time.time() - start
@@ -254,6 +253,7 @@ def get_local_test_data():
     return (x_dense_test, x_sparse_test, y_test)
 
 def start_batch(minibatches):
+    print(minibatches)
     wrenexec = pywren.default_executor()
     futures = wrenexec.map(gradient_batch, minibatches)  # Map future
     return futures
@@ -273,20 +273,16 @@ def check_key(key):
 
     try:
         s3.Object('camus-pywren-489', key).load()
-    except botocore.exceptions.ClientError as e:
-        if e.response['Error']['Code'] == "404":
+    except:
             # The object does not exist.
-            return False
-        else:
-            # Something else has gone wrong.
-            raise ValueError("boom")
-    else:
-        return True
+        return False
+    return True
 
-
+b = Barrier(8, timeout=300)
 def fetch_thread(i):
     global outf
     global grad_q
+    global b
     s3 = boto3.resource('s3')
 
     my_bucket = s3.Bucket('camus-pywren-489')
@@ -295,11 +291,13 @@ def fetch_thread(i):
     start_time = time.time()
     while time.time() - start_time < total_time:
         key = 'gradient_indiv_%d' % i
-        while time.time() - start_time < total_time and (check_key(key)):
+        while time.time() - start_time < total_time and (not check_key(key)):
             pass
         object = my_bucket.Object('gradient_indiv_%d' % i)
-        body = object.get()['Body'].read()
-
+        try:
+            grad = pickle.loads(object.get()['Body'].read())
+        except:
+            continue
         for key, value in grad[0].items():
             if key == "subtime" and log:
                 outf.write("%s %f\n" % ("Sit_time", time.time() - value))
@@ -307,8 +305,12 @@ def fetch_thread(i):
                 if log:
                     outf.write("%s %f\n" % (key, value))
 
-        grad_q.put(grad[-2:])
+        b.wait()
         object.delete()
+        if i == 0:
+            b.reset()
+
+        grad_q.put(grad[-2:])
         num += 1
         if time.time() - start_time > total_time:
             return;
@@ -389,7 +391,7 @@ def main(thread, log=False):
 
     # start jobs
     minibatches = get_minibatches(fin)
-    minibatches = zip(minibatches, range(len(minibatches)))
+    minibatches = list(zip(minibatches, range(len(minibatches))))
     futures = start_batch(minibatches)
     fin = 0
     iter = 0
@@ -410,6 +412,7 @@ def main(thread, log=False):
         if fin > 0:
             print("Processed: %d" % fin)
             minibatches = get_minibatches(fin)
+            minibatches = list(zip(minibatches, range(len(minibatches))))
             futures = start_batch(minibatches)
     print("Main thread has stopped")
 
@@ -455,7 +458,7 @@ if __name__ == "__main__":
     thread = Thread(target=error_thread, args=(model, ))
     fetchers = []
 
-    for i in range(1, 9):
+    for i in range(0, 9):
         ft = Thread(target=fetch_thread, args = (i, ))
         ft.start()
         fetchers.append(ft)
