@@ -17,7 +17,6 @@ from scipy import sparse
 from functools import reduce
 from multiprocessing.pool import ThreadPool
 from sklearn.preprocessing import OneHotEncoder
-from rediscluster import StrictRedisCluster
 
 HASH = 524288
 
@@ -33,10 +32,8 @@ fname = "def.txt"
 outf = None
 
 
-redis_host = "neel-redis5.lpfp73.clustercfg.usw2.cache.amazonaws.com"
+redis_host = "andyredis.snwohz.ng.0001.usw2.cache.amazonaws.com"
 redis_port = 6379
-startup_nodes = [{"host": redis_host, "port": redis_port}]
-redis_client = StrictRedisCluster(startup_nodes=startup_nodes, decode_responses=True, skip_full_coverage_check=True)
 
 
 fin = []
@@ -50,6 +47,7 @@ def prediction(param_dense, param_sparse, x_dense, x_sparse):
     return out
 
 def store_update(update):
+    redis_client = redis.StrictRedis(host=redis_host, port=6379, db=0)
     t0 = time.time()
     key = 'gradient_%d' % np.random.randint(1, 9)
     datastr = pickle.dumps(update)
@@ -183,20 +181,27 @@ def get_minis(key, det):
 # AWS helper function
 def get_data(key, a = False):
 
-    s3 = boto3.resource('s3')
-    t0 = time.time()
-    obj = s3.Object('camus-pywren-489', key)
-    t1 = time.time()
-    body = obj.get()['Body'].read()
-    data = pickle.loads(body)
-    # Return data, time to deseralize, time to fetch
-    if a:
-        return data, time.time() - t1, t1 - t0
-    return data
 
-
+    if '3k' in key or 'proper' in key:
+        s3 = boto3.resource('s3')
+        t0 = time.time()
+        obj = s3.Object('camus-pywren-489', key)
+        t1 = time.time()
+        body = obj.get()['Body'].read()
+        data = pickle.loads(body)
+        # Return data, time to deseralize, time to fetch
+        if a:
+            return data, time.time() - t1, t1 - t0
+        return data
+    else:
+        cli = redis.StrictRedis(host="andyredis.snwohz.ng.0001.usw2.cache.amazonaws.com", port=6379, db=0)
+        string = cli.get(key)
+        if a:
+            return pickle.loads(string), 0, 0
+        return pickle.loads(string)
 
 def store_model(model):
+    redis_client = redis.StrictRedis(host=redis_host, port=6379, db=0)
     param_dense, param_sparse = model
     key = 'model'
     model = (param_dense, param_sparse)
@@ -238,7 +243,7 @@ def init_model():
     return model
 
 def get_test_data():
-    test_key = "proper-0"
+    test_key = "3k-0"
     x_dense_test, x_idx_test, y_test = get_data(test_key)
     x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
     for i in range(x_dense_test.shape[0]):
@@ -247,7 +252,6 @@ def get_test_data():
 
 def get_local_test_data():
     f = open("testset.data", "rb")
-    f.seek(0)
     x_dense_test, x_idx_test, y_test = pickle.load(f)
     x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
     for i in range(x_dense_test.shape[0]):
@@ -271,25 +275,29 @@ def m(f):
 grad_q = []
 
 def fetch_thread(i):
+    redis_client = redis.StrictRedis(host=redis_host, port=6379, db=0)
     global outf
     global grad_q
+    global log
 
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
         lst = redis_client.lrange("gradient_%d" % i, 0, -1)
+        redis_client.ltrim("gradient_%d" % i, 0, -1)
         for object in lst:
             s = time.time()
             grad = pickle.loads(object)
 
             for key, value in grad[0].items():
-                if key == "subtime":
+                if key == "subtime" and log:
                     outf.write("%s %f\n" % ("Sit_time", time.time() - value))
                 else:
-                    outf.write("%s %f\n" % (key, value))
+                    if log:
+                        outf.write("%s %f\n" % (key, value))
 
             grad_q.append(grad[-2:])
-            redis_client.lpop('gradient_%d' % i)
+            #object.delete()
             num += 1
             #print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
             if time.time() - start_time > total_time:
@@ -407,6 +415,7 @@ if __name__ == "__main__":
     global log
     global fname
     log = False
+    redis_client = redis.StrictRedis(host=redis_host, port=6379, db=0)
     if len(sys.argv) >= 2:
         data = json.loads(sys.argv[1])
         total_time = float(data['total_time'])
