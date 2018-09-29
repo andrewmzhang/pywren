@@ -1,3 +1,4 @@
+import queue
 import sys
 import pywren
 import numpy as np
@@ -19,9 +20,9 @@ HASH = 524288
 
 lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
-batch_size = 1000      # Size of whole batch
-total_batches = 1000   # Entire number of batches in dataset
-batch_file_size = 10    # Number of minibatches per lambda 
+batch_size = 3000      # Size of whole batch
+total_batches = 500   # Entire number of batches in dataset
+batch_file_size = 10    # Number of lambda 
 num_lambdas = 10
 total_time = 60
 log = False
@@ -68,7 +69,9 @@ def gradient_batch(xpys):
     for xpy in xpys:
         det = {}
         for mb in get_minis(xpy, det):
-
+            if iterno > 0:
+                det['loop_time'] = time.time() - prev_start_time
+            prev_start_time = time.time()
 
             left, right, det = gradient(mb, model, det)
             out = (np.sum(left, axis=0), np.sum(right, axis=0))
@@ -77,6 +80,7 @@ def gradient_batch(xpys):
                 det['init_model_fetch'] = fetch_model_time
 
             if iterno > 0:
+                
                 det['reserialize_time'] = reser
                 det['upload_time'] = upload
                 det['model_deser_time'] = model_deser
@@ -85,13 +89,14 @@ def gradient_batch(xpys):
             to_store = [det, out[0], out[1]]
             reser, upload = store_update(to_store)
             model, model_deser, model_fetch = get_data('model', True)
+            iterno += 1
             if time.time() - start > 240:
                 break;
-            iterno += 1
         if time.time() - start > 240:
             break;
     
     to_store[0]['lambda_time_alive'] = time.time() - start
+    to_store[0]['total_iters'] = iterno
     return to_store
 
 # convert matrices to dense and sparse halves
@@ -205,7 +210,7 @@ def get_minibatches(num, over=2):
         begin, end = index, index + over
         minis = []
         for b in range(begin, end):
-            key = 'proper-' + str(b)
+            key = '3k-' + str(b)
             minis.append(key)
         index = index + over
         group.append(' '.join(mini for mini in minis))
@@ -230,7 +235,7 @@ def init_model():
     return model
 
 def get_test_data():
-    test_key = "proper-0"
+    test_key = "3k-0"
     x_dense_test, x_idx_test, y_test = get_data(test_key)
     x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
     for i in range(x_dense_test.shape[0]):
@@ -260,7 +265,7 @@ def m(f):
         return [], f
 
 
-grad_q = []
+grad_q = queue.Queue()
 
 def fetch_thread(i):
     global outf
@@ -284,7 +289,7 @@ def fetch_thread(i):
                 else:
                     outf.write("%s %f\n" % (key, value))
             
-            grad_q.append(grad[-2:])
+            grad_q.put(grad[-2:])
             object.delete()
             num += 1
             #print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
@@ -296,6 +301,7 @@ def error_thread(model):
     global grad_q
     global log
     global fname
+    global index
     
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket('camus-pywren-489')
@@ -311,23 +317,30 @@ def error_thread(model):
     if True:
         print(fname[:-4] + ".pkl")
         f = open(fname[:-4] + ".pkl", 'wb')
+    time_model_lst = []
     while time.time() - start_time < total_time:
-        grads = grad_q[:]
-        grad_q = []
-        if len(grads) > 0:
+        
+        if not grad_q.empty():
+            sz = grad_q.qsize()
+            grads = []
+            for _ in range(sz):
+                grad = grad_q.get()
+                grads.append(grad)
+                grad_q.task_done()
             bg = reduce_sum(grads)
             model = update_model(model, bg)
             store_model(model)
             num += len(grads)
-            error = loglikelihood(test_data, model)
+            #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
-            print("[ERROR_TASK]", curr_time, error, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
+                print("dump done")
                 saves += 1
 
-    print("Saves: ", saves)
+    print("Saves: ", saves, "Index:", index)
     if True:
         large_test = get_local_test_data()
         f.close()
