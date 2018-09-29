@@ -182,21 +182,26 @@ def get_minis(key, det):
 
 # AWS helper function
 def get_data(key, a = False):
+
+    s3 = boto3.resource('s3')
     t0 = time.time()
+    obj = s3.Object('camus-pywren-489', key)
     t1 = time.time()
-    body = redis_client.get(key)
+    body = obj.get()['Body'].read()
     data = pickle.loads(body)
     # Return data, time to deseralize, time to fetch
     if a:
         return data, time.time() - t1, t1 - t0
     return data
+    
+    
 
 def store_model(model):
     param_dense, param_sparse = model
     key = 'model'
     model = (param_dense, param_sparse)
     datastr = pickle.dumps(model)
-    redis_client.set(Key=key, Body=datastr)
+    redis_client.set(key, datastr)
 
 index = 1
 def get_minibatches(num, over=2):
@@ -272,7 +277,7 @@ def fetch_thread(i):
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
-        lst = redis_client.lrange(0, -1)
+        lst = redis_client.lrange("gradient_%d" % i, 0, -1)
         for object in lst:
             s = time.time()
             grad = pickle.loads(object)
