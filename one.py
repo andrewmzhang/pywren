@@ -25,6 +25,8 @@ from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
 
+from help import get_test
+
 HASH = 524288
 HASH_SIZE = HASH
 lr = 0.0001            # Learning rate
@@ -49,7 +51,6 @@ fin = []
 def predict(row_values, coefficients):
     yhat = coefficients[0]
     for i in range(len(row_values)):
-        print(row_values)
         index = row_values[i][0]
         value = row_values[i][1]
         yhat += coefficients[index + 1] * value
@@ -88,6 +89,8 @@ def gradient_batch(xpys):
             grad = gradient(mb, model)
             store_update(grad)
             model = get_model()
+            #model = update_model(model, grad)
+            #store_model(model)
     return "Success!!"
 
 def gradient(train_mb, model):
@@ -108,9 +111,11 @@ def gradient(train_mb, model):
             index = values[i][0]
             value = values[i][1]
             coef_g[index + 1] = error * value + coef_g.get(index+1, 0)
+        if cnt % MB_SIZE == 0:
+            for k in coef_g.keys():
+                gradient.append((k, lr * coef_g[k] / float(MB_SIZE)))
+            coef_g = {0: 0}
 
-        for k in coef_g.keys():
-            gradient.append((k, lr * coef_g[k] / float(MB_SIZE)))
     return gradient
 
 # Calculate accuracy percentage
@@ -131,7 +136,7 @@ def loglikelihood(test_data, model):
         actuals.append(y)
         logits.append(yhat)
 
-    return logloss_metric(actual, logits)
+    return logloss_metric(actuals, logits)
 
 def get_minis(key):
     data = get_data(key)
@@ -161,7 +166,7 @@ def store_model(model):
     thread.start()
 
 index = 1
-def get_minibatches(num, over=2):
+def get_minibatches(num, over=1):
     global index
     group = []
     for i in range(num):
@@ -193,11 +198,7 @@ def get_test_data():
     return test
 
 def get_local_test_data():
-    f = open("testset.data", "rb")
-    f.seek(0)
-    testdata = pickle.load(f)
-    f.close()
-    return testdata
+    return get_test()
 
 def start_batch(minibatches):
     wrenexec = pywren.default_executor()
@@ -270,9 +271,10 @@ def error_thread(model, outf):
                 store_model(model)
                 grad_q.task_done()
                 num += 1
+            #model = get_model()
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
-            print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            print("[ERROR_TASK]", curr_time, loglikelihood(test_data, model), "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
             outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
             if True:
                 print("dumping")
@@ -282,7 +284,7 @@ def error_thread(model, outf):
 
     print("Saves: ", saves, "Index:", index)
     if True:
-        large_test = get_local_test_data()
+        large_test = get_test()
         f.close()
         outf = open(fname[:-4] + ".csv", "w")
         with open(fname[:-4] + ".pkl", 'rb') as f:

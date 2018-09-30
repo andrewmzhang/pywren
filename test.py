@@ -30,7 +30,7 @@ scaler.fit(fit_mat)
 
 xs_dense = scaler.transform(xs_dense)
 
-xs_dense = np.column_stack([xs_dense]) # N by (D+1)
+#xs_dense = np.column_stack([xs_dense]) # N by (D+1)
 
 training_data = []
 
@@ -44,7 +44,7 @@ for i in range(data.shape[0]):
         cnt += 1
     for idx in xs_sparse[i]:
         row.append((int(idx+14),1))
-        training_data.append([label, row])
+    training_data.append([label, row])
     print(i, data.shape[0])
 
 
