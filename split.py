@@ -81,6 +81,8 @@ for b in range(min(batches, max_size)):
             row.append((idx+14,1))
         training_data.append([label, row])
 
+        print(training_data)
+        exit()
 
 
     batch = training_data
