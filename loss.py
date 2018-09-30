@@ -15,7 +15,7 @@ for a in [(0.1,1)]:
     fname = "tmp-%f-loss-%d.txt" % (lr, it)
     config['fname'] = fname
     config['lr'] = lr
-    config['total_time'] = 1200
+    config['total_time'] = 100
     cmd = "python3 %s '%s' " % (programs[it], json.dumps(config))
     print(cmd)
     os.system(cmd)

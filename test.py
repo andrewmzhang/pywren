@@ -30,10 +30,26 @@ scaler.fit(fit_mat)
 
 xs_dense = scaler.transform(xs_dense)
 
-xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
+xs_dense = np.column_stack([xs_dense]) # N by (D+1)
 
-batch = (xs_dense, xs_sparse, ys)
+training_data = []
+
+for i in range(data.shape[0]):
+    label = ys[0]
+
+    cnt = 0
+    row = []
+    for x in xs_dense[i]:
+        row.append((cnt, x))
+        cnt += 1
+    for idx in xs_sparse[i]:
+        row.append((int(idx+14),1))
+        training_data.append([label, row])
+    print(i, data.shape[0])
+
+
 out = open("testset.data", "wb")
-pickle.dump(batch, out)
+print("Writing to testset.data")
+pickle.dump(training_data, out)
 out.close()
 

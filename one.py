@@ -29,8 +29,9 @@ HASH = 524288
 HASH_SIZE = HASH
 lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
+MB_SIZE = minibatch_size
 batch_size = 20      # Size of whole batch
-total_batches = 1000   # Entire number of batches in dataset
+total_batches = 100   # Entire number of batches in dataset
 batch_file_size = 10    # Number of lambda
 num_lambdas = 10
 total_time = 60
@@ -48,7 +49,7 @@ fin = []
 def predict(row_values, coefficients):
     yhat = coefficients[0]
     for i in range(len(row_values)):
-
+        print(row_values)
         index = row_values[i][0]
         value = row_values[i][1]
         yhat += coefficients[index + 1] * value
@@ -75,22 +76,23 @@ def get_model():
 # Map function for pywren main
 def gradient_batch(xpys):
     start = time.time()
-    model = get_data('model')
+    model = get_model()
     fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
     reser, upload, model_fetch, model_deser = 0, 0, 0, 0
 
     for xpy in xpys:
         det = {}
-        for mb in get_minis(xpy, det):
+        for mb in get_minis(xpy):
             # Calculate gradient from minibatch
-            gradient = gradient(mb, model)
-            store_update(gradient)
+            grad = gradient(mb, model)
+            store_update(grad)
             model = get_model()
     return "Success!!"
 
 def gradient(train_mb, model):
-
+    global lr
+    global MB_SIZE
     cnt = 0
     coef_g = {0: 0}
     gradient = []
@@ -99,7 +101,7 @@ def gradient(train_mb, model):
         label = row[0]
         values = row[1]
 
-        yhat = predict(values, coef)
+        yhat = predict(values, model)
         error = label - yhat
         coef_g[0] += error * 1.0
         for i in range(len(values)):
@@ -108,21 +110,28 @@ def gradient(train_mb, model):
             coef_g[index + 1] = error * value + coef_g.get(index+1, 0)
 
         for k in coef_g.keys():
-            gradient.append((k, l_rate * coef_g[k] / float(MB_SIZE)))
+            gradient.append((k, lr * coef_g[k] / float(MB_SIZE)))
     return gradient
+
+# Calculate accuracy percentage
+def logloss_metric(actual, probs):
+    total = 0
+    for i in range(len(actual)):
+        total += (actual[i] * np.log(probs[i])) + ((1 - actual[i]) * np.log(1 - probs[i]))
+    return total / len(actual)
+
 
 # Log loglikelihood func
 def loglikelihood(test_data, model):
-    xs_dense, xs_sparse, ys = test_data
-    param_dense, param_sparse = model
-    preds = prediction(param_dense, param_sparse, xs_dense, xs_sparse)
-    ys_temp = ys.reshape((-1, 1))
-    cors = np.around(preds)
-    cors -= ys_temp
-    cors = np.abs(cors)
-    print("Accu", np.mean(cors))
-    tot = np.multiply(ys_temp, np.log(preds)) + np.multiply((1 - ys_temp), np.log(1 - preds))
-    return np.mean(tot)
+    actuals = []
+    logits = []
+    for row in test_data:
+        y = row[0]
+        yhat = predict(row[1], model)
+        actuals.append(y)
+        logits.append(yhat)
+
+    return logloss_metric(actual, logits)
 
 def get_minis(key):
     data = get_data(key)
@@ -161,7 +170,7 @@ def get_minibatches(num, over=2):
         begin, end = index, index + over
         minis = []
         for b in range(begin, end):
-            key = 'mini20-' + str(b)
+            key = 'mini20:lst-' + str(b)
             minis.append(key)
         index = index + over
         group.append(' '.join(mini for mini in minis))
@@ -179,22 +188,16 @@ def init_model():
     return model
 
 def get_test_data():
-    test_key = "mini20-0"
-    x_dense_test, x_idx_test, y_test = get_data(test_key)
-    x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
-    for i in range(x_dense_test.shape[0]):
-        x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
-    return (x_dense_test, x_sparse_test, y_test)
+    test_key = "mini20:lst-0"
+    test = get_data(test_key)
+    return test
 
 def get_local_test_data():
     f = open("testset.data", "rb")
     f.seek(0)
-    x_dense_test, x_idx_test, y_test = pickle.load(f)
-    x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
-    for i in range(x_dense_test.shape[0]):
-        x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
+    testdata = pickle.load(f)
     f.close()
-    return (x_dense_test, x_sparse_test, y_test)
+    return testdata
 
 def start_batch(minibatches):
     wrenexec = pywren.default_executor()
@@ -263,7 +266,7 @@ def error_thread(model, outf):
             grads = []
             for _ in range(sz):
                 grad = grad_q.get()
-                model = update_model(model, bg)
+                model = update_model(model, grad)
                 store_model(model)
                 grad_q.task_done()
                 num += 1
@@ -322,7 +325,10 @@ def main(thread, log=False):
         res = []
         ded = []
 
-        pywren.get_all_results(futures)
+        try:
+            pywren.get_all_results(futures)
+        except:
+            continue
 
         fin = len(futures)
         iter += fin
