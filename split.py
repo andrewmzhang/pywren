@@ -6,14 +6,14 @@ import boto3
 import pickle
 
 # Split the large file into bits
-batch_size = 1000      # size of minibatch
+batch_size = 20     # size of minibatch
 
 
 header_name = "sample"
 suffix_name =".txt"
 
 input_file = "train.txt"
-max_size = 500
+max_size = 10000
 
 with open(input_file, "rb") as f:
     cnt = 0
@@ -56,7 +56,7 @@ scaler.fit(fit_mat)
 for b in range(min(batches, max_size)):
     
     data = np.loadtxt("sample"+str(b)+'.txt', converters=converter, delimiter="\t")
-    key = 'proper-' + str(b)
+    key = 'mini20:lst-' + str(b)
     
     print("Setting up", key)
     assert data.shape[0] == batch_size
@@ -66,7 +66,24 @@ for b in range(min(batches, max_size)):
 
     xs_dense = scaler.transform(xs_dense)
     xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
-    batch = (xs_dense, xs_sparse, ys)
+
+
+    training_data = []
+    for i in range(batch_size):
+        label = ys[0]
+        
+        cnt = 0
+        row = []
+        for x in xs_dense[i]:
+            row.append((cnt, x))
+            cnt += 1
+        for idx in xs_sparse[i]:
+            row.append((idx+14,1))
+        training_data.append([label, row])
+
+
+
+    batch = training_data
     datastr = pickle.dumps(batch)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 

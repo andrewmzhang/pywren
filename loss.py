@@ -10,7 +10,7 @@ config = {
 
 programs = ['', 'one.py', 'two.py', 'a.py', 'four.py', 'five.py']
 #  (0.0005,1), (0.0005,2), (0.0005,3),
-for a in [(0.0005,5)]:
+for a in [(0.1,1)]:
     lr, it = a
     fname = "tmp-%f-loss-%d.txt" % (lr, it)
     config['fname'] = fname
