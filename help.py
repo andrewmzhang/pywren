@@ -14,7 +14,7 @@ def get_test():
     for i in range(14, 40):
         converter[i] = lambda s: hash(s) % HASH
 
-    data = np.loadtxt('testset.txt', converters=converter, delimiter="\t")
+    data = np.loadtxt('testsetlarge.txt', converters=converter, delimiter="\t")
 
 
     ys = data[:, 0]
