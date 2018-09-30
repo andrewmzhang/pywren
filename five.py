@@ -54,6 +54,7 @@ def store_update(update):
     t1 = time.time()
     def up_func(key, datastr):
         redis_client.lpush(key, datastr)
+        redis_client.ltrim(key, 0, 10)
     thread = Thread(target = up_func, args = (key, datastr ))
     thread.start()
     # Return reserialzie, upload
@@ -169,8 +170,14 @@ def reduce_sum(lst):
     start_time = time.time()
     l = [l[0] for l in lst]
     r = [l[1] for l in lst]
+    sparses_set = set()
+    
+    for item in lst:
+        sparses = item[2]
+        for s in sparses:
+            sparses_set.update(s.tolist())
     left_grad, right_grad = np.sum(np.vstack(l), axis=0), np.sum(np.vstack(r), axis=0)
-    return left_grad, right_grad, lst[2]
+    return left_grad, right_grad, sparses_set
 
 # Log loglikelihood func
 def loglikelihood(test_data, model):
@@ -282,7 +289,7 @@ def init_model():
     return model
 
 def get_test_data():
-    test_key = "3k-0"
+    test_key = "proper-0"
     x_dense_test, x_idx_test, y_test = get_data(test_key)
     x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
     for i in range(x_dense_test.shape[0]):
@@ -323,7 +330,7 @@ def fetch_thread(i):
     start_time = time.time()
     while time.time() - start_time < total_time:
         lst = redis_client.lrange("gradient_%d" % i, 0, -1)
-        redis_client.ltrim("gradient_%d" % i, 0, -1)
+        redis_client.ltrim("gradient_%d" % i, -1, 0)
         for object in lst:
             s = time.time()
             grad = pickle.loads(object)
@@ -343,7 +350,7 @@ def fetch_thread(i):
                 return;
 
 
-def error_thread(model):
+def error_thread(model, outf):
     global grad_q
     global log
     global fname
@@ -371,7 +378,8 @@ def error_thread(model):
             error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, error, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
-            outf.write("[ERROR_TASK]", curr_time, error, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
@@ -485,7 +493,7 @@ if __name__ == "__main__":
     print(len(model))
     store_model(model)
 
-    thread = Thread(target=error_thread, args=(model, ))
+    thread = Thread(target=error_thread, args=(model,outf, ))
     fetchers = []
 
     for i in range(1, 9):

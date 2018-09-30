@@ -32,7 +32,7 @@ fname = "def.txt"
 outf = None
 
 
-redis_host = "andyredis.snwohz.ng.0001.usw2.cache.amazonaws.com"
+redis_host = "larger.snwohz.ng.0001.usw2.cache.amazonaws.com"
 redis_port = 6379
 
 
@@ -52,10 +52,8 @@ def store_update(update):
     key = 'gradient_%d' % np.random.randint(1, 9)
     datastr = pickle.dumps(update)
     t1 = time.time()
-    def up_func(key, datastr):
-        redis_client.lpush(key, datastr)
-    thread = Thread(target = up_func, args = (key, datastr ))
-    thread.start()
+    redis_client.lpush(key, datastr)
+    redis_client.ltrim(key, 0, 10)
     # Return reserialzie, upload
     return t1 - t0, time.time() - t1
 
@@ -194,7 +192,7 @@ def get_data(key, a = False):
             return data, time.time() - t1, t1 - t0
         return data
     else:
-        cli = redis.StrictRedis(host="andyredis.snwohz.ng.0001.usw2.cache.amazonaws.com", port=6379, db=0)
+        cli = redis.StrictRedis(host=redis_host, port=6379, db=0)
         string = cli.get(key)
         if a:
             return pickle.loads(string), 0, 0
@@ -237,6 +235,8 @@ def update_model(model, gradient):
     return (param_dense, param_sparse)
 
 def init_model():
+    redis_client = redis.StrictRedis(host=redis_host, port=6379, db=0)
+    redis_client.flushall()
     param_dense = np.zeros((14, 1))
     param_sparse = sparse.lil_matrix((HASH, 1))
     model = (param_dense, param_sparse)
@@ -284,7 +284,7 @@ def fetch_thread(i):
     start_time = time.time()
     while time.time() - start_time < total_time:
         lst = redis_client.lrange("gradient_%d" % i, 0, -1)
-        redis_client.ltrim("gradient_%d" % i, 0, -1)
+        redis_client.ltrim("gradient_%d" % i, -1, 0)
         for object in lst:
             s = time.time()
             grad = pickle.loads(object)
@@ -304,7 +304,7 @@ def fetch_thread(i):
                 return;
 
 
-def error_thread(model):
+def error_thread(model, outf):
     global grad_q
     global log
     global fname
@@ -332,6 +332,8 @@ def error_thread(model):
             error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, error, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+            
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
@@ -444,7 +446,7 @@ if __name__ == "__main__":
     model = init_model()
     store_model(model)
 
-    thread = Thread(target=error_thread, args=(model, ))
+    thread = Thread(target=error_thread, args=(model,outf, ))
     fetchers = []
 
     for i in range(1, 9):

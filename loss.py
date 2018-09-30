@@ -8,9 +8,9 @@ config = {
 
 
 
-programs = ['', 'one.py', 'two.py', 'a.py', 'three.py', 'four.py', 'five.py']
-
-for a in [ (0.0005,1), (0.0005,2), (0.0005,3),(0.0005,4), (0.0005,5)]:
+programs = ['', 'one.py', 'two.py', 'a.py', 'four.py', 'five.py']
+#  (0.0005,1), (0.0005,2), (0.0005,3),
+for a in [(0.0005,5)]:
     lr, it = a
     fname = "tmp-%f-loss-%d.txt" % (lr, it)
     config['fname'] = fname

@@ -298,7 +298,7 @@ def fetch_thread(i):
                 return;
 
 
-def error_thread(model):
+def error_thread(model, outf):
     global grad_q
     global log
     global fname
@@ -335,6 +335,7 @@ def error_thread(model):
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
@@ -435,7 +436,7 @@ if __name__ == "__main__":
     model = init_model()
     store_model(model)
 
-    thread = Thread(target=error_thread, args=(model, ))
+    thread = Thread(target=error_thread, args=(model,outf, ))
     fetchers = []
 
     for i in range(1, 9):

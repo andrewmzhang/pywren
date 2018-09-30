@@ -80,20 +80,18 @@ def gradient_batch(xpys):
                 det['init_model_fetch'] = fetch_model_time
 
             if iterno > 0:
-                
                 det['reserialize_time'] = reser
                 det['upload_time'] = upload
                 det['model_deser_time'] = model_deser
                 det['model_fetch_time'] = model_fetch
+
             det['subtime'] = time.time()
             to_store = [det, out[0], out[1]]
             reser, upload = store_update(to_store)
             model, model_deser, model_fetch = get_data('model', True)
             iterno += 1
-            if time.time() - start > 240:
-                break;
-        if time.time() - start > 240:
             break;
+        break;
     
     to_store[0]['lambda_time_alive'] = time.time() - start
     to_store[0]['total_iters'] = iterno
@@ -265,40 +263,7 @@ def m(f):
         return [], f
 
 
-grad_q = queue.Queue()
-
-def fetch_thread(i):
-    global outf
-    global grad_q
-    s3 = boto3.resource('s3')
-
-    my_bucket = s3.Bucket('camus-pywren-489')
-
-    num = 0
-    start_time = time.time()
-    while time.time() - start_time < total_time:
-        lst = my_bucket.objects.filter(Prefix='gradient_%d/' % i).all()
-        for object in lst:
-            s = time.time()
-            obj = object.get()
-            grad = pickle.loads(obj['Body'].read())
-            
-            for key, value in grad[0].items():
-                if key == "subtime" and log:
-                    outf.write("%s %f\n" % ("Sit_time", time.time() - value))
-                else:
-                    if log:
-                        outf.write("%s %f\n" % (key, value))
-            
-            grad_q.put(grad[-2:])
-            object.delete()
-            num += 1
-            #print("Fetched: %d, took: %f, thread: %d. Sit time: %f" % (num, time.time() - s, i, time.time() - grad[0]['subtime']))
-            if time.time() - start_time > total_time:
-                return;
-
-
-def error_thread(model, outf):
+def error_thread(model):
     global grad_q
     global log
     global fname
@@ -335,8 +300,6 @@ def error_thread(model, outf):
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
-            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
-            
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
@@ -387,29 +350,15 @@ def main(thread, log=False):
         fin = 0
         res = []
         ded = []
-
-        #print("Start pool")
         t = time.time()
-        pool = ThreadPool(num_lambdas)
-        resa = []
-        resa = pool.map(m, fs)
-        #print("End pool: %f" % (time.time() - t))
 
-        res = []
-        for a in resa:
-            if a != None:
-                fs.remove(a[1])
-                res.append(a[0])
-                print("FIN", a)
 
 
         fin = len(res)
         iter += fin
-        if fin > 0:
-            print("Processed: %d" % fin)
-            minibatches = get_minibatches(fin)
-            # Run Map Reduce with Pywren
-            fs.extend(start_batch(minibatches))
+        print("Processed: %d" % fin)
+        minibatches = get_minibatches(fin)
+        # Run Map Reduce with Pywren
     print("Main thread has stopped")
 
 
@@ -451,31 +400,14 @@ if __name__ == "__main__":
     model = init_model()
     store_model(model)
 
-    thread = Thread(target=error_thread, args=(model, outf))
-    fetchers = []
+    thread = Thread(target=error_thread, args=(model, ))
 
-    for i in range(1, 9):
-        ft = Thread(target=fetch_thread, args = (i, ))
-        ft.start()
-        fetchers.append(ft)
-    try:
-        main(thread, log)
-        print(fin)
-    except KeyboardInterrupt:
-        for ft in fetchers:
-            ft.join()
+    main(thread)
 
-        thread.join()
-        if log:
-            outf.close()
-            print("outf closed by interrupt")
-        exit()
 
 
     if log:
         print("issued log halt")
-        for ft in fetchers:
-            ft.join()        
         thread.join()
         time.sleep(10)
         outf.close()

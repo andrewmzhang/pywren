@@ -23,7 +23,7 @@ lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
 batch_size = 3000      # Size of whole batch
 total_batches = 500   # Entire number of batches in dataset
-batch_file_size = 8    # Number of lambda
+batch_file_size = 10    # Number of lambda
 num_lambdas = 10
 total_time = 60
 log = False
@@ -278,7 +278,7 @@ def check_key(key):
         return False
     return True
 
-b = Barrier(8, timeout=300)
+b = Barrier(10, timeout=300)
 def fetch_thread(i):
     global outf
     global grad_q
@@ -316,7 +316,7 @@ def fetch_thread(i):
             return;
 
 
-def error_thread(model):
+def error_thread(model, outf):
     global grad_q
     global log
     global fname
@@ -353,6 +353,8 @@ def error_thread(model):
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+            
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
@@ -455,10 +457,10 @@ if __name__ == "__main__":
     model = init_model()
     store_model(model)
 
-    thread = Thread(target=error_thread, args=(model, ))
+    thread = Thread(target=error_thread, args=(model,outf, ))
     fetchers = []
 
-    for i in range(0, 9):
+    for i in range(0, 10):
         ft = Thread(target=fetch_thread, args = (i, ))
         ft.start()
         fetchers.append(ft)
