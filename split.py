@@ -65,12 +65,12 @@ for b in range(min(batches, max_size)):
     xs_sparse = data[:, 14:]
 
     xs_dense = scaler.transform(xs_dense)
-    xs_dense = np.column_stack([np.ones((xs_dense.shape[0])), xs_dense]) # N by (D+1)
+    xs_dense = np.column_stack([xs_dense]) # N by (D+1)
 
 
     training_data = []
     for i in range(batch_size):
-        label = ys[0]
+        label = ys[i]
         
         cnt = 0
         row = []
@@ -80,10 +80,6 @@ for b in range(min(batches, max_size)):
         for idx in xs_sparse[i]:
             row.append((idx+14,1))
         training_data.append([label, row])
-
-        print(training_data)
-        exit()
-
 
     batch = training_data
     datastr = pickle.dumps(batch)

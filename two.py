@@ -1,3 +1,12 @@
+from random import seed
+from random import randrange
+from csv import reader
+from math import exp
+import time
+import mmh3
+import sys
+import numpy as np
+
 import queue
 import sys
 import pywren
@@ -7,22 +16,25 @@ import boto3
 import pickle
 import time
 import random
-import botocore
+
 import json
 
-from threading import Barrier
 from threading import Event
 from threading import Thread
 from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
 
-HASH = 524288
+from help import get_test
 
+
+HASH = 524288
+HASH_SIZE = HASH
 lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
-batch_size = 3000      # Size of whole batch
-total_batches = 500   # Entire number of batches in dataset
+MB_SIZE = minibatch_size
+batch_size = 20      # Size of whole batch
+total_batches = 100   # Entire number of batches in dataset
 batch_file_size = 10    # Number of lambda
 num_lambdas = 10
 total_time = 60
@@ -37,145 +49,106 @@ from sklearn.preprocessing import OneHotEncoder
 fin = []
 
 # Prediction function
-def prediction(param_dense, param_sparse, x_dense, x_sparse):
-    val = -x_dense.dot(param_dense)
-    val2 = -x_sparse.dot(param_sparse)
-    val = val + val2
-    out =  1 / (1 + np.exp(val))
-    return out
+def predict(row_values, coefficients):
+    yhat = coefficients[0]
+    for i in range(len(row_values)):
+        index = row_values[i][0]
+        value = row_values[i][1]
+        yhat += coefficients[index + 1] * value
+    try:
+        res = 1.0 / (1.0 + exp(-yhat))
+    except:
+        print("yhat: ", yhat)
+        sys.exit(-1)
+    return res
 
-def store_update(update, number):
-    t0 = time.time()
+def store_update(update):
     s3 = boto3.resource('s3')
-    key = 'gradient_indiv_%d' % (number)
+    key = 'gradient_indiv_%d' % (np.random.randint(1, 9), random.randint(1, 10))
     datastr = pickle.dumps(update)
-    t1 = time.time()
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
-    # Return reserialzie, upload
-    return t1 - t0, time.time() - t1
+
+def get_model():
+    s3 = boto3.resource('s3')
+    key = 'model'
+    obj = s3.Object('camus-pywren-489', key)
+    body = obj.get()['Body'].read()
+    return pickle.loads(body)
 
 
 # Map function for pywren main
 def gradient_batch(xpys):
-    xpys, number = xpys
-    print("I am lambda number: %d" % number)
     start = time.time()
-    model = get_data('model')
+    model = get_model()
     fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
     reser, upload, model_fetch, model_deser = 0, 0, 0, 0
 
-    iterno = 0
     for xpy in xpys:
         det = {}
-        for mb in get_minis(xpy, det):
-            if iterno > 0:
-                det['loop_time'] = time.time() - prev_start_time
-            prev_start_time = time.time()
-
-            left, right, det = gradient(mb, model, det)
-            out = (np.sum(left, axis=0), np.sum(right, axis=0))
-
-            if iterno == 0:
-                det['init_model_fetch'] = fetch_model_time
-
-            if iterno > 0:
-
-                det['reserialize_time'] = reser
-                det['upload_time'] = upload
-                det['model_deser_time'] = model_deser
-                det['model_fetch_time'] = model_fetch
-            det['subtime'] = time.time()
-            to_store = [det, out[0], out[1]]
-            reser, upload = store_update(to_store, number)
-
+        for mb in get_minis(xpy):
+            # Calculate gradient from minibatch
+            grad = gradient(mb, model)
+            store_update(grad)
+            model = get_model()
+            #model = update_model(model, grad)
+            #store_model(model)
             while check_key('gradient_indiv_%d' % (number)):
                 pass
-            model, model_deser, model_fetch = get_data('model', True)
-            iterno += 1
-            break;
-
-    to_store[0]['lambda_time_alive'] = time.time() - start
-    to_store[0]['total_iters'] = iterno
-    return to_store
-
-# convert matrices to dense and sparse halves
-def convert(x_idx, shape):
-    x_sparse = sparse.lil_matrix((shape, HASH))
-    for i in range(shape):
-        x_sparse[i, x_idx[i]] = np.ones(len(x_idx[i]))
-    return x_sparse
-
-def gradient(xpy, model, det):
-
-    start = time.time()
-    # Fetch model
-    param_dense, param_sparse = model
-
-    # Fetch data and deser
-    (x_dense, x_idx, y) = xpy
-
-    # Convert data to sparse
-    t = time.time()
-    x_sparse = convert(x_idx, x_dense.shape[0])
-    det['convert_to_sparse'] = time.time() - t
+    return "Success!!"
 
 
+def gradient(train_mb, model):
+    global lr
+    global MB_SIZE
+    cnt = 0
+    coef_g = {0: 0}
+    gradient = []
+    for row in train_mb:
+        cnt += 1
+        label = row[0]
+        values = row[1]
 
-    # Predictions
-    t = time.time()
-    y = np.reshape(y, (-1, 1))
-    error = y - prediction(param_dense, param_sparse, x_dense, x_sparse)
-    error = np.reshape(error, (-1,))
-    det['prediction_time'] = time.time() - t
+        yhat = predict(values, model)
+        error = label - yhat
+        coef_g[0] += error * 1.0
+        for i in range(len(values)):
+            index = values[i][0]
+            value = values[i][1]
+            coef_g[index + 1] = error * value + coef_g.get(index+1, 0)
+        if cnt % MB_SIZE == 0:
+            for k in coef_g.keys():
+                gradient.append((k, lr * coef_g[k] / float(MB_SIZE)))
+            coef_g = {0: 0}
 
-
-    # Calculation left_gradient
-    t = time.time()
-    left_grad = np.multiply(x_dense, error.reshape(-1, 1))
-    det['lgradient_calc'] = time.time() - t
-
-    # Calculate right gradient (sparse part)
-    t = time.time()
-    temp = sparse.lil_matrix((x_dense.shape[0], x_dense.shape[0]))
-
-    temp.setdiag(error.A1)
-    right = temp.T * x_sparse
-    right_grad = right
-    det['rgradient_calc'] = time.time() - t
-
-    det['total_gradient_loop' ] = time.time() - start
-    return left_grad, right_grad, det
+    return gradient
 
 # Reduce function
-def reduce_sum(lst):
-    start_time = time.time()
-    l = [l[0] for l in lst]
-    r = [l[1] for l in lst]
-    left_grad, right_grad = np.sum(np.vstack(l), axis=0), np.sum(np.vstack(r), axis=0)
-    return left_grad, right_grad
+# Calculate accuracy percentage
+def logloss_metric(actual, probs):
+    total = 0
+    for i in range(len(actual)):
+        total += (actual[i] * np.log(probs[i])) + ((1 - actual[i]) * np.log(1 - probs[i]))
+    return total / len(actual)
+
 
 # Log loglikelihood func
 def loglikelihood(test_data, model):
-    xs_dense, xs_sparse, ys = test_data
-    param_dense, param_sparse = model
-    preds = prediction(param_dense, param_sparse, xs_dense, xs_sparse)
-    ys_temp = ys.reshape((-1, 1))
-    cors = np.around(preds)
-    cors -= ys_temp
-    cors = np.abs(cors)
-    print("Accu", np.mean(cors))
-    tot = np.multiply(ys_temp, np.log(preds)) + np.multiply((1 - ys_temp), np.log(1 - preds))
-    return np.mean(tot)
+    actuals = []
+    logits = []
+    for row in test_data:
+        y = row[0]
+        yhat = predict(row[1], model)
+        actuals.append(y)
+        logits.append(yhat)
 
-def get_minis(key, det):
-    data, deser, fetch = get_data(key, True)
-    det['batch_deserialized_time'] = deser
-    det['batch_fetch_time'] = fetch
-    a, b, c = data
+    return logloss_metric(actuals, logits)
+
+def get_minis(key):
+    data = get_data(key)
     idx = 0
     while idx + minibatch_size <= batch_size:
-        yield a[idx: idx +minibatch_size], b[idx: idx +minibatch_size], c[idx: idx +minibatch_size],
+        yield data[idx: idx +minibatch_size]
         idx += minibatch_size
 
 
@@ -187,21 +160,19 @@ def get_data(key, a = False):
     t1 = time.time()
     body = obj.get()['Body'].read()
     data = pickle.loads(body)
-    # Return data, time to deseralize, time to fetch
-    if a:
-        return data, time.time() - t1, t1 - t0
     return data
 
 def store_model(model):
-    param_dense, param_sparse = model
     s3 = boto3.resource('s3')
     key = 'model'
-    model = (param_dense, param_sparse)
-    datastr = pickle.dumps(model)
-    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    def lamb():
+        datastr = pickle.dumps(model)
+        s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    thread = Thread(target=lamb,)
+    thread.start()
 
 index = 1
-def get_minibatches(num, over=2):
+def get_minibatches(num, over=100):
     global index
     group = []
     for i in range(num):
@@ -210,7 +181,7 @@ def get_minibatches(num, over=2):
         begin, end = index, index + over
         minis = []
         for b in range(begin, end):
-            key = '3k-' + str(b)
+            key = 'mini20:lst-' + str(b)
             minis.append(key)
         index = index + over
         group.append(' '.join(mini for mini in minis))
@@ -218,29 +189,19 @@ def get_minibatches(num, over=2):
     return group
 
 def update_model(model, gradient):
-    global lr
-    left, right = gradient
-    left = np.reshape(left, (14, 1))
-    right = np.reshape(right, (HASH, 1))
-    param_dense, param_sparse = model
+    for (k, v) in gradient:
+        model[k] += v
+    return model
 
-    param_dense = np.add(param_dense, np.multiply(lr, left))
-    param_sparse = sparse.lil_matrix(np.add(param_sparse.todense(), np.multiply(lr, right)))
-    return (param_dense, param_sparse)
 
 def init_model():
-    param_dense = np.zeros((14, 1))
-    param_sparse = sparse.lil_matrix((HASH, 1))
-    model = (param_dense, param_sparse)
+    model = [0.0 for i in range(HASH_SIZE+14 + 1)]
     return model
 
 def get_test_data():
-    test_key = "3k-0"
-    x_dense_test, x_idx_test, y_test = get_data(test_key)
-    x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
-    for i in range(x_dense_test.shape[0]):
-        x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
-    return (x_dense_test, x_sparse_test, y_test)
+    test_key = "mini20:lst-0"
+    test = get_data(test_key)
+    return test
 
 def get_local_test_data():
     f = open("testset.data", "rb")
@@ -270,11 +231,9 @@ grad_q = queue.Queue()
 
 def check_key(key):
     s3 = boto3.resource('s3')
-
     try:
         s3.Object('camus-pywren-489', key).load()
     except:
-            # The object does not exist.
         return False
     return True
 
@@ -354,7 +313,7 @@ def error_thread(model, outf):
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
             outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
-            
+
             if True:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
