@@ -13,7 +13,7 @@ import pywren
 import numpy as np
 import math
 import boto3
-import pickle
+import _pickle as pickle
 import time
 import random
 
@@ -32,10 +32,10 @@ HASH_SIZE = HASH
 lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
 MB_SIZE = minibatch_size
-batch_size = 3000      # Size of whole batch
+batch_size = 20      # Size of whole batch
 total_batches = 1000   # Entire number of batches in dataset
-batch_file_size = 1    # Number of lambda
-num_lambdas = 1
+batch_file_size = 10    # Number of lambda
+num_lambdas = 10
 total_time = 60
 log = False
 fname = "def.txt"
@@ -80,17 +80,12 @@ def gradient_batch(xpys):
     model = get_model()
     fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
-    reser, upload, model_fetch, model_deser = 0, 0, 0, 0
     n = 0
     for xpy in xpys:
         det = {}
         for mb in get_minis(xpy):
-            # Calculate gradient from minibatch
             grad = gradient(mb, model)
             store_update(grad)
-            model = update_model(model, grad)
-            #model = update_model(model, grad)
-            store_model(model)
             n += 1
     
     return "Success %d!!" % n
@@ -161,11 +156,10 @@ def get_data(key, a = False):
 def store_model(model):
     s3 = boto3.resource('s3')
     key = 'model'
-    def lamb():
-        datastr = pickle.dumps(model)
-        s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
-    thread = Thread(target=lamb,)
-    thread.start()
+    datastr = pickle.dumps(model)
+    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    #thread = Thread(target=lamb,)
+    #thread.start()
 
 index = 1
 def get_minibatches(num, over=1):
@@ -177,7 +171,7 @@ def get_minibatches(num, over=1):
         begin, end = index, index + over
         minis = []
         for b in range(begin, end):
-            key = '3k:lst-' + str(b)
+            key = 'mini20:lst-' + str(b)
             minis.append(key)
         index = index + over
         group.append(' '.join(mini for mini in minis))
@@ -195,7 +189,7 @@ def init_model():
     return model
 
 def get_test_data():
-    test_key = "3k:lst-0"
+    test_key = "mini20:lst-0"
     test = get_data(test_key)
     return test
 
@@ -247,16 +241,22 @@ def dump_thread(q, f):
     global total_time
     start = time.time()
     print("DUMP THREAD STARTED")
-    while time.time() - start < total_time + 120:
+    outf = open(fname[:-4] + ".csv2", "w")
+    testdata = get_test()
+    while time.time() - start < total_time or not q.empty():
         if time.time() - start > total_time and q.empty():
             break;
         if not q.empty():
-            time_model = q.get()
+            t, model = q.get()
             print("dumping")
             s = time.time()
-            pickle.dump(time_model, f)
+            #pickle.dump(time_model, f)
+            loss = loglikelihood(testdata, model)
+            print("wrote: %f %f" % (t, loss))
+            outf.write("%f, %f\n" % (t, loss))
             print("dump done took", time.time() - s)
             q.task_done()
+    outf.close()
     print("DUMP THREAD STOPPED")
         
         
@@ -291,26 +291,37 @@ def error_thread(model, outf):
     while time.time() - start_time < total_time:
         if not grad_q.empty():
             grad = grad_q.get()
+            s = time.time()
+            model = update_model(model, grad)
+            print("Updating took", time.time() - s)
+            s = time.time()
+            def up():
+                store_model(model)
+            up_thread = Thread(target=up)
+            up_thread.start()
+            print("Store took", time.time() - s)
             grad_q.task_done()
             num += 1
+            
             #model = get_model()
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
-            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+            #outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+            
             if True and curr_time - last_dump > 1:
                 s = time.time()
-                model = get_model()
-                print("dumping into thread")
+                #print("dumping into thread")
                 time_model_q.put((curr_time, model[:]))
-                print("dump into thread", time.time() - s)
+                #print("dump into thread", time.time() - s)
                 last_dump = curr_time
                 saves += 1
 
     print("Saves: ", saves, "Index:", index)
     dump_t.join()
     print("Dumpt is good")
-    if True:
+    f.close()
+    if False:
         large_test = get_test_data()
         f.close()
         outf = open(fname[:-4] + ".csv", "w")
@@ -353,6 +364,7 @@ def main(thread, log=False):
     print("Main thread start")
     while time.time() - start_time < total_time:
         print("hit", time.time() - start_time)
+        time.sleep(1)
         # Store model
         fin = 0
         res = []
@@ -439,3 +451,4 @@ if __name__ == "__main__":
         time.sleep(10)
         outf.close()
         print("outf closed by END")
+        exit()

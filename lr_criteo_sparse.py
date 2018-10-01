@@ -8,7 +8,7 @@ import mmh3
 import sys
 import numpy as np
 HASH_SIZE = 100000
-MB_SIZE = 100
+MB_SIZE = 20
 # result is a list of tuples (label, list of tuples (index, value))
 # Load a CSV file
 def load_csv_sparse_tab(filename):
@@ -90,6 +90,8 @@ def normalize_dataset(dataset, minmax):
         for i in range(len(row_values)):
             index = row_values[i][0]
             value = row_values[i][1]
+            if index > 14:
+                continue
 
             if minmax[index][0] == minmax[index][1]:
                 continue
@@ -203,8 +205,8 @@ def coefficients_sgd(train, test, l_rate, n_epoch):
                     coef[k] += l_rate * coef_g[k] / float(MB_SIZE)
                 errors = []
                 coef_g = {0: 0}
-            if cnt % 100 == 0:
-                print("Iterno", cnt)
+            if cnt % MB_SIZE == 0:
+                print("Iterno", cnt / MB_SIZE)
                 logits = []
                 for row in test:
                     label = row[0]

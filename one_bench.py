@@ -13,7 +13,7 @@ import pywren
 import numpy as np
 import math
 import boto3
-import pickle
+import _pickle as pickle
 import time
 import random
 
@@ -21,13 +21,11 @@ import json
 
 from threading import Event
 from threading import Thread
-from threading import Barrier
 from sklearn import preprocessing
 from scipy import sparse
 from functools import reduce
 
 from help import get_test
-
 
 HASH = 524288
 HASH_SIZE = HASH
@@ -35,7 +33,7 @@ lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
 MB_SIZE = minibatch_size
 batch_size = 20      # Size of whole batch
-total_batches = 10000   # Entire number of batches in dataset
+total_batches = 1000   # Entire number of batches in dataset
 batch_file_size = 10    # Number of lambda
 num_lambdas = 10
 total_time = 60
@@ -55,7 +53,6 @@ def predict(row_values, coefficients):
     for i in range(len(row_values)):
         index = row_values[i][0]
         value = row_values[i][1]
-        #print(index)
         yhat += coefficients[index + 1] * value
     try:
         res = 1.0 / (1.0 + exp(-yhat))
@@ -64,9 +61,9 @@ def predict(row_values, coefficients):
         sys.exit(-1)
     return res
 
-def store_update(update, number):
+def store_update(update):
     s3 = boto3.resource('s3')
-    key = 'gradient_indiv_%d' % (number)
+    key = 'gradient_%d/g_%d' % (np.random.randint(1, 20), random.randint(1, 100))
     datastr = pickle.dumps(update)
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
@@ -77,30 +74,29 @@ def get_model():
     body = obj.get()['Body'].read()
     return pickle.loads(body)
 
-
 # Map function for pywren main
-def gradient_batch(xpys):
-    xpys, number = xpys
+def gradient_batch(xpys, rtime):
     start = time.time()
     model = get_model()
     fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
-
+    n = 0
     for xpy in xpys:
         det = {}
         for mb in get_minis(xpy):
-            # Calculate gradient from minibatch
-            #print(mb)
             grad = gradient(mb, model)
-            store_update(grad, number)
-            model = get_model()
-            #model = update_model(model, grad)
-            #store_model(model)
-            begin = time.time()
-            while check_key('gradient_indiv_%d' % (number)) and time.time() - begin < 10:
-                pass
-    return "Success!!"
+            sub_time = time.time()
+            store_update(grad)
+            done_time = time.time()
+            n += 1
+    time_of_death = time.time()
+    data = {}
+    data['init_time'] = rtime - start
+    data['grad_calc'] = sub_time - start
+    data['submit_time'] = subtime
+    data['total_time'] = time_of_death - start
 
+    return data
 
 def gradient(train_mb, model):
     global lr
@@ -127,7 +123,6 @@ def gradient(train_mb, model):
 
     return gradient
 
-# Reduce function
 # Calculate accuracy percentage
 def logloss_metric(actual, probs):
     total = 0
@@ -169,14 +164,13 @@ def get_data(key, a = False):
 def store_model(model):
     s3 = boto3.resource('s3')
     key = 'model'
-    def lamb():
-        datastr = pickle.dumps(model)
-        s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
-    thread = Thread(target=lamb,)
-    thread.start()
+    datastr = pickle.dumps(model)
+    s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
+    #thread = Thread(target=lamb,)
+    #thread.start()
 
 index = 1
-def get_minibatches(num, over=10):
+def get_minibatches(num, over=1):
     global index
     group = []
     for i in range(num):
@@ -208,17 +202,9 @@ def get_test_data():
     return test
 
 def get_local_test_data():
-    f = open("testset.data", "rb")
-    f.seek(0)
-    x_dense_test, x_idx_test, y_test = pickle.load(f)
-    x_sparse_test = sparse.lil_matrix((x_dense_test.shape[0], HASH))
-    for i in range(x_dense_test.shape[0]):
-        x_sparse_test[i, x_idx_test[i]] = np.ones(len(x_idx_test[i]))
-    f.close()
-    return (x_dense_test, x_sparse_test, y_test)
+    return get_test()
 
 def start_batch(minibatches):
-    print(minibatches)
     wrenexec = pywren.default_executor()
     futures = wrenexec.map(gradient_batch, minibatches)  # Map future
     return futures
@@ -233,52 +219,56 @@ def m(f):
 
 grad_q = queue.Queue()
 
-def check_key(key):
-    s3 = boto3.resource('s3')
-    try:
-        s3.Object('camus-pywren-489', key).load()
-    except:
-        return False
-    return True
-
-b = Barrier(10, timeout=300)
 def fetch_thread(i):
     global outf
     global grad_q
-    global b
     s3 = boto3.resource('s3')
+    print("Fetcher %d started" % i)
 
     my_bucket = s3.Bucket('camus-pywren-489')
 
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
-        key = 'gradient_indiv_%d' % i
-        begin = time.time()
-        while time.time() - start_time < total_time and (not check_key(key)):
-            if time.time() - begin > 10:
-                print("Thread %d took too long" % i)
-                b.wait()
-                break
-            pass
-        object = my_bucket.Object('gradient_indiv_%d' % i)
-        try:
-            grad = pickle.loads(object.get()['Body'].read())
-        except:
-            continue
+        lst = my_bucket.objects.filter(Prefix='gradient_%d/' % i).all()
+        for obj in lst:
+            s = time.time()
+            obj_res = obj.get()
+            grad = pickle.loads(obj_res['Body'].read())
 
-        grad_q.put(grad)
-        print("Thread %d waiting..." % i)
-        b.wait()
-            
-        print("Thread %d moving..." % i)
-        object.delete()
-        #if i == 0:
-        #    b.reset()
+            grad_q.put(grad)
+            obj.delete()
+                 
+            num += 1
+            print("Fetched: %d, took: %f, thread: %d" % (num, time.time() - s, i))
+            if time.time() - start_time > total_time:
+                return;
 
-        num += 1
-        if time.time() - start_time > total_time:
-            return;
+
+def dump_thread(q, f):
+    global total_time
+    start = time.time()
+    print("DUMP THREAD STARTED")
+    outf = open(fname[:-4] + ".csv2", "w")
+    testdata = get_test()
+    while time.time() - start < total_time or not q.empty():
+        if time.time() - start > total_time and q.empty():
+            break;
+        if not q.empty():
+            t, model = q.get()
+            print("dumping")
+            s = time.time()
+            #pickle.dump(time_model, f)
+            loss = loglikelihood(testdata, model)
+            print("wrote: %f %f" % (t, loss))
+            outf.write("%f, %f\n" % (t, loss))
+            print("dump done took", time.time() - s)
+            q.task_done()
+    outf.close()
+    print("DUMP THREAD STOPPED")
+        
+        
+    
 
 
 def error_thread(model, outf):
@@ -287,52 +277,60 @@ def error_thread(model, outf):
     global fname
     global index
 
-    s3 = boto3.resource('s3')
-    my_bucket = s3.Bucket('camus-pywren-489')
+
+
     num = 0
     print("Starting error thread")
     start_time = time.time()
     # Clear existing gradients
 
-    test_data = get_test_data()
+    #test_data = get_test_data()
 
     saves = 0
 
-    if True:
-        print(fname[:-4] + ".pkl")
-        f = open(fname[:-4] + ".pkl", 'wb')
-    time_model_lst = []
-    last_dump = -100
-    while time.time() - start_time < total_time:
+    print(fname[:-4] + ".pkl")
+    f = open(fname[:-4] + ".pkl", 'wb')
+    time_model_q = queue.Queue()
+    dump_t = Thread(target=dump_thread, args=(time_model_q, f, ))
+    dump_t.start()
 
+    last_dump = -1000
+    print("[ERROR TASK STARTING]")
+    while time.time() - start_time < total_time:
         if not grad_q.empty():
-            sz = grad_q.qsize()
-            print("Saw", sz)
-            grads = []
-            for _ in range(sz):
-                grad = grad_q.get()
-                model = update_model(model, grad)
+            grad = grad_q.get()
+            s = time.time()
+            model = update_model(model, grad)
+            print("Updating took", time.time() - s)
+            s = time.time()
+            def up():
                 store_model(model)
-                grad_q.task_done()
-                num += 1
+            up_thread = Thread(target=up)
+            up_thread.start()
+            print("Store took", time.time() - s)
+            grad_q.task_done()
+            num += 1
+            
+            #model = get_model()
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
-            print("[ERROR_TASK]", curr_time, loglikelihood(test_data, model), "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
-            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
-
+            print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            #outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+            
             if True and curr_time - last_dump > 1:
-                print("dumping")
-                pickle.dump((curr_time, model), f)
-                print("dump done")
-                saves += 1
+                s = time.time()
+                #print("dumping into thread")
+                time_model_q.put((curr_time, model[:]))
+                #print("dump into thread", time.time() - s)
                 last_dump = curr_time
-            if time.time() - start_time > total_time:
-                break;
-
+                saves += 1
 
     print("Saves: ", saves, "Index:", index)
-    if True:
-        large_test = get_test()
+    dump_t.join()
+    print("Dumpt is good")
+    f.close()
+    if False:
+        large_test = get_test_data()
         f.close()
         outf = open(fname[:-4] + ".csv", "w")
         with open(fname[:-4] + ".pkl", 'rb') as f:
@@ -366,7 +364,6 @@ def main(thread, log=False):
 
     # start jobs
     minibatches = get_minibatches(fin)
-    minibatches = list(zip(minibatches, range(len(minibatches))))
     futures = start_batch(minibatches)
     fin = 0
     iter = 0
@@ -375,19 +372,22 @@ def main(thread, log=False):
     print("Main thread start")
     while time.time() - start_time < total_time:
         print("hit", time.time() - start_time)
+        time.sleep(1)
         # Store model
         fin = 0
         res = []
         ded = []
 
-        pywren.get_all_results(futures)
-
-        fin = len(futures)
+        try:
+            res = pywren.get_all_results(futures)
+        except:
+            continue
+        print(res)
+        fin = len(res)
         iter += fin
         if fin > 0:
             print("Processed: %d" % fin)
             minibatches = get_minibatches(fin)
-            minibatches = list(zip(minibatches, range(len(minibatches))))
             futures = start_batch(minibatches)
     print("Main thread has stopped")
 
@@ -421,8 +421,8 @@ if __name__ == "__main__":
 
     my_bucket = s3.Bucket('camus-pywren-489')
 
-    for i in range(0, 10):
-        string = "gradient_invid_%d/" % i
+    for i in range(1, 20):
+        string = "gradient_%d/" % i
         for object in my_bucket.objects.filter(Prefix=string).all():
             object.delete()
 
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     thread = Thread(target=error_thread, args=(model,outf, ))
     fetchers = []
 
-    for i in range(0, 10):
+    for i in range(1, 20):
         ft = Thread(target=fetch_thread, args = (i, ))
         ft.start()
         fetchers.append(ft)
@@ -459,3 +459,4 @@ if __name__ == "__main__":
         time.sleep(10)
         outf.close()
         print("outf closed by END")
+        exit()

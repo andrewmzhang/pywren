@@ -260,6 +260,7 @@ def error_thread(model, outf):
         print(fname[:-4] + ".pkl")
         f = open(fname[:-4] + ".pkl", 'wb')
     time_model_lst = []
+    last_dump = -1000
     while time.time() - start_time < total_time:
 
         if not grad_q.empty():
@@ -276,10 +277,11 @@ def error_thread(model, outf):
             curr_time = time.time() - start_time
             print("[ERROR_TASK]", curr_time, loglikelihood(test_data, model), "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
             outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
-            if True:
+            if True and curr_time - last_dump > 1:
                 print("dumping")
                 pickle.dump((curr_time, model), f)
                 print("dump done")
+                last_dump = curr_time
                 saves += 1
 
     print("Saves: ", saves, "Index:", index)
@@ -288,8 +290,12 @@ def error_thread(model, outf):
         f.close()
         outf = open(fname[:-4] + ".csv", "w")
         with open(fname[:-4] + ".pkl", 'rb') as f:
+            last = -1000
             for i in range(saves):
                 t, model = pickle.load(f)
+                if t - last < 5:
+                    continue
+                last = t
                 error = loglikelihood(large_test, model)
                 print("wrote: %f %f" % (t, error))
                 outf.write("%f, %f\n" % (t, error))
@@ -375,7 +381,7 @@ if __name__ == "__main__":
         for object in my_bucket.objects.filter(Prefix=string).all():
             object.delete()
 
-    time.sleep(5)
+    time.sleep(1)
     model = init_model()
     store_model(model)
 

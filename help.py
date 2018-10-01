@@ -14,24 +14,18 @@ def get_test():
     for i in range(14, 40):
         converter[i] = lambda s: hash(s) % HASH
 
-    data = np.loadtxt('testsetlarge.txt', converters=converter, delimiter="\t")
+    data = np.loadtxt('randtest1.txt', converters=converter, delimiter="\t")
 
 
     ys = data[:, 0]
     xs_dense = data[:, 1:14]
     xs_sparse = data[:, 14:]
 
+
     scaler = preprocessing.MinMaxScaler()
     fit_mat = [
-        [0,-3, 0, 0, 0, 0,0,0, 0,0,0, 0,0],
-        [5775, 257675, 65535, 969, 23159500, 431037, 56311, 6047, 29019, 11, 231, 4008, 7393] ]
-    fit_mat = np.matrix(fit_mat)
-    scaler.fit(fit_mat)
-
-
-    xs_dense = scaler.transform(xs_dense)
-
-    xs_dense = np.column_stack([xs_dense]) # N by (D+1)
+        [0,      -2,     0,   0,        0,      0,    0,    0,     0,    0,   0,    0,    0], 
+        [936, 19999, 65535, 390,  2502894,  27526, 6428, 2466,  9858,    7, 144,  451, 2278] ]
 
     training_data = []
 
@@ -41,7 +35,8 @@ def get_test():
         cnt = 0
         row = []
         for x in xs_dense[i]:
-            row.append((cnt, x))
+            new_value = (x - fit_mat[0][cnt]) / (fit_mat[1][cnt] - fit_mat[0][cnt])
+            row.append((cnt, new_value))
             cnt += 1
         for idx in xs_sparse[i]:
             row.append((int(idx+14),1))

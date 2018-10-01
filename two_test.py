@@ -35,7 +35,7 @@ lr = 0.0001            # Learning rate
 minibatch_size = 20    # Size of minibatch
 MB_SIZE = minibatch_size
 batch_size = 20      # Size of whole batch
-total_batches = 10000   # Entire number of batches in dataset
+total_batches = 2500   # Entire number of batches in dataset
 batch_file_size = 10    # Number of lambda
 num_lambdas = 10
 total_time = 60
@@ -82,7 +82,6 @@ def get_model():
 def gradient_batch(xpys):
     xpys, number = xpys
     start = time.time()
-    model = get_model()
     fetch_model_time = time.time() - start
     xpys = xpys.split(" ")
 
@@ -91,9 +90,9 @@ def gradient_batch(xpys):
         for mb in get_minis(xpy):
             # Calculate gradient from minibatch
             #print(mb)
+            model = get_model()
             grad = gradient(mb, model)
             store_update(grad, number)
-            model = get_model()
             #model = update_model(model, grad)
             #store_model(model)
             begin = time.time()
@@ -176,7 +175,7 @@ def store_model(model):
     thread.start()
 
 index = 1
-def get_minibatches(num, over=10):
+def get_minibatches(num, over=25):
     global index
     group = []
     for i in range(num):
@@ -241,7 +240,7 @@ def check_key(key):
         return False
     return True
 
-b = Barrier(10, timeout=300)
+b = Barrier(num_lambdas, timeout=300)
 def fetch_thread(i):
     global outf
     global grad_q
@@ -249,7 +248,7 @@ def fetch_thread(i):
     s3 = boto3.resource('s3')
 
     my_bucket = s3.Bucket('camus-pywren-489')
-
+    test = get_test()
     num = 0
     start_time = time.time()
     while time.time() - start_time < total_time:
@@ -261,18 +260,22 @@ def fetch_thread(i):
                 b.wait()
                 break
             pass
-        object = my_bucket.Object('gradient_indiv_%d' % i)
+        obj = my_bucket.Object('gradient_indiv_%d' % i)
         try:
-            grad = pickle.loads(object.get()['Body'].read())
+            grad = pickle.loads(obj.get()['Body'].read())
         except:
             continue
 
         grad_q.put(grad)
+        #model = get_model()
+        #model = update_model(model, grad)
+        #store_model(model)
         print("Thread %d waiting..." % i)
         b.wait()
-            
+        if num % 10 == 0:
+            print('[ERROR]', num, time.time() - start_time, loglikelihood(test, model))
         print("Thread %d moving..." % i)
-        object.delete()
+        obj.delete()
         #if i == 0:
         #    b.reset()
 
@@ -281,58 +284,93 @@ def fetch_thread(i):
             return;
 
 
+def dump_thread(q, f):
+    global total_time
+    start = time.time()
+    print("DUMP THREAD STARTED")
+    outf = open(fname[:-4] + ".csv2", "w")
+    testdata = get_test()
+    while time.time() - start < total_time or not q.empty():
+        if time.time() - start > total_time and q.empty():
+            break;
+        if not q.empty():
+            t, model = q.get()
+            print("dumping")
+            s = time.time()
+            #pickle.dump(time_model, f)
+            loss = loglikelihood(testdata, model)
+            print("\033[92m wrote: %f %f \033[0m" % (t, loss))
+            outf.write("%f, %f\n" % (t, loss))
+            print("dump done took", time.time() - s)
+            q.task_done()
+    outf.close()
+    print("DUMP THREAD STOPPED")
+
+
+
+
+
+
 def error_thread(model, outf):
     global grad_q
     global log
     global fname
     global index
 
-    s3 = boto3.resource('s3')
-    my_bucket = s3.Bucket('camus-pywren-489')
+
+
     num = 0
     print("Starting error thread")
     start_time = time.time()
     # Clear existing gradients
 
-    test_data = get_test_data()
+    #test_data = get_test_data()
 
     saves = 0
 
-    if True:
-        print(fname[:-4] + ".pkl")
-        f = open(fname[:-4] + ".pkl", 'wb')
-    time_model_lst = []
-    last_dump = -100
-    while time.time() - start_time < total_time:
+    print(fname[:-4] + ".pkl")
+    f = open(fname[:-4] + ".pkl", 'wb')
+    time_model_q = queue.Queue()
+    dump_t = Thread(target=dump_thread, args=(time_model_q, f, ))
+    dump_t.start()
 
+    last_dump = -1000
+    print("[ERROR TASK STARTING]")
+    while time.time() - start_time < total_time:
         if not grad_q.empty():
-            sz = grad_q.qsize()
-            print("Saw", sz)
-            grads = []
-            for _ in range(sz):
-                grad = grad_q.get()
-                model = update_model(model, grad)
+            grad = grad_q.get()
+            s = time.time()
+            model = update_model(model, grad)
+            print("Updating took", time.time() - s)
+            s = time.time()
+            def up():
                 store_model(model)
-                grad_q.task_done()
-                num += 1
+            up_thread = Thread(target=up)
+            up_thread.start()
+            print("Store took", time.time() - s)
+            grad_q.task_done()
+            num += 1
+
+            #model = get_model()
             #error = loglikelihood(test_data, model)
             curr_time = time.time() - start_time
-            print("[ERROR_TASK]", curr_time, loglikelihood(test_data, model), "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
-            outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
+            print("[ERROR_TASK]", curr_time, 0, "this many grads:", num, "Sec / Grad:", (time.time() - start_time)/ num)
+            #outf.write("[ERROR_TASK] " +str(curr_time)+ " this many grads: " + str(num) + " Sec / Grad: " + str( (time.time() - start_time)/ num) )
 
             if True and curr_time - last_dump > 1:
-                print("dumping")
-                pickle.dump((curr_time, model), f)
-                print("dump done")
-                saves += 1
+                s = time.time()
+                #print("dumping into thread")
+                time_model_q.put((curr_time, model[:]))
+                #print("dump into thread", time.time() - s)
                 last_dump = curr_time
-            if time.time() - start_time > total_time:
-                break;
-
+                saves += 1
 
     print("Saves: ", saves, "Index:", index)
-    if True:
-        large_test = get_test()
+    dump_t.join()
+    print("Dumpt is good")
+    f.close()
+    if False:
+        large_test = get_test_data()
         f.close()
         outf = open(fname[:-4] + ".csv", "w")
         with open(fname[:-4] + ".pkl", 'rb') as f:
@@ -433,7 +471,7 @@ if __name__ == "__main__":
     thread = Thread(target=error_thread, args=(model,outf, ))
     fetchers = []
 
-    for i in range(0, 10):
+    for i in range(0, num_lambdas):
         ft = Thread(target=fetch_thread, args = (i, ))
         ft.start()
         fetchers.append(ft)

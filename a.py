@@ -201,7 +201,7 @@ def store_model(model):
     s3.Bucket('camus-pywren-489').put_object(Key=key, Body=datastr)
 
 index = 1
-def get_minibatches(num, over=2):
+def get_minibatches(num, over=25):
     global index
     group = []
     for i in range(num):
@@ -210,7 +210,7 @@ def get_minibatches(num, over=2):
         begin, end = index, index + over
         minis = []
         for b in range(begin, end):
-            key = '3k-' + str(b)
+            key = '3k:lst-' + str(b)
             minis.append(key)
         index = index + over
         group.append(' '.join(mini for mini in minis))
